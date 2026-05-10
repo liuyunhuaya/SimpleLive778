@@ -1,0 +1,240 @@
+workflows:
+  # iOS 打包
+  ios-release:
+    name: Build iOS
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      # 清理缓存
+      - name: Clean build
+        script: |
+          cd simple_live_app
+          flutter clean
+          rm -rf ios/Pods ios/Podfile.lock
+          
+      # 安装 simple_live_core 依赖
+      - name: Install core dependencies
+        script: |
+          cd simple_live_core
+          flutter pub get
+          
+      # 安装 simple_live_app 依赖
+      - name: Install app dependencies
+        script: |
+          cd simple_live_app
+          flutter pub get
+          
+      # 运行 build_runner
+      - name: Run build_runner
+        script: |
+          cd simple_live_app
+          dart run build_runner build --delete-conflicting-outputs
+          
+      # 修复 FollowUser adapter
+      - name: Fix FollowUser adapter
+        script: |
+          cd simple_live_app
+          dart run scripts/fix_follow_user_adapter.dart
+        ignore_failure: true
+          
+      # 安装 CocoaPods
+      - name: Install CocoaPods
+        script: |
+          cd simple_live_app/ios
+          pod install
+          
+      # 构建 iOS（不签名）
+      - name: Build iOS
+        script: |
+          cd simple_live_app
+          flutter build ios --release --no-codesign
+          
+      # 创建 IPA
+      - name: Create IPA
+        script: |
+          cd simple_live_app
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r SimpleLive-iOS.ipa Payload
+          rm -rf Payload
+          
+    artifacts:
+      - simple_live_app/SimpleLive-iOS.ipa
+
+  # macOS 打包
+  macos-release:
+    name: Build macOS
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      # 启用 macOS desktop
+      - name: Enable macOS desktop
+        script: flutter config --enable-macos-desktop
+        
+      # 清理缓存
+      - name: Clean build
+        script: |
+          cd simple_live_app
+          flutter clean
+          rm -rf macos/Pods macos/Podfile.lock
+          
+      # 安装 simple_live_core 依赖
+      - name: Install core dependencies
+        script: |
+          cd simple_live_core
+          flutter pub get
+          
+      # 安装 simple_live_app 依赖
+      - name: Install app dependencies
+        script: |
+          cd simple_live_app
+          flutter pub get
+          
+      # 运行 build_runner
+      - name: Run build_runner
+        script: |
+          cd simple_live_app
+          dart run build_runner build --delete-conflicting-outputs
+          
+      # 修复 FollowUser adapter
+      - name: Fix FollowUser adapter
+        script: |
+          cd simple_live_app
+          dart run scripts/fix_follow_user_adapter.dart
+        ignore_failure: true
+          
+      # 安装 appdmg 和 flutter_distributor
+      - name: Install build tools
+        script: |
+          npm install -g appdmg
+          dart pub global activate flutter_distributor
+          
+      # 构建 macOS
+      - name: Build macOS
+        script: |
+          cd simple_live_app
+          flutter_distributor package --platform macos --targets dmg,zip --skip-clean
+          
+      # 合并 macOS 产物到一个压缩包
+      - name: Package macOS artifacts
+        script: |
+          cd simple_live_app
+          # 获取版本号
+          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //' | tr -d ' ')
+          # 创建临时目录
+          mkdir -p SimpleLive-Mac
+          # 复制 dmg 和 zip 到临时目录
+          cp build/dist/$VERSION/*.dmg SimpleLive-Mac/ 2>/dev/null || true
+          cp build/dist/$VERSION/*.zip SimpleLive-Mac/ 2>/dev/null || true
+          # 创建最终的压缩包
+          zip -r SimpleLive-Mac.zip SimpleLive-Mac
+          # 清理临时目录
+          rm -rf SimpleLive-Mac
+          
+    artifacts:
+      - simple_live_app/SimpleLive-Mac.zip
+
+  # 同时打包 iOS + macOS
+  all-apple:
+    name: Build iOS + macOS
+    max_build_duration: 90
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      # 启用 macOS desktop
+      - name: Enable macOS desktop
+        script: flutter config --enable-macos-desktop
+        
+      # 清理缓存
+      - name: Clean build
+        script: |
+          cd simple_live_app
+          flutter clean
+          rm -rf ios/Pods ios/Podfile.lock
+          rm -rf macos/Pods macos/Podfile.lock
+          
+      # 安装 simple_live_core 依赖
+      - name: Install core dependencies
+        script: |
+          cd simple_live_core
+          flutter pub get
+          
+      # 安装 simple_live_app 依赖
+      - name: Install app dependencies
+        script: |
+          cd simple_live_app
+          flutter pub get
+          
+      # 运行 build_runner
+      - name: Run build_runner
+        script: |
+          cd simple_live_app
+          dart run build_runner build --delete-conflicting-outputs
+          
+      # 修复 FollowUser adapter
+      - name: Fix FollowUser adapter
+        script: |
+          cd simple_live_app
+          dart run scripts/fix_follow_user_adapter.dart
+        ignore_failure: true
+          
+      # ===== iOS 构建 =====
+      - name: Install iOS CocoaPods
+        script: |
+          cd simple_live_app/ios
+          pod install
+          
+      - name: Build iOS
+        script: |
+          cd simple_live_app
+          flutter build ios --release --no-codesign
+          
+      - name: Create iOS IPA
+        script: |
+          cd simple_live_app
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r SimpleLive-iOS.ipa Payload
+          rm -rf Payload
+          
+      # ===== macOS 构建 =====
+      - name: Install macOS build tools
+        script: |
+          npm install -g appdmg
+          dart pub global activate flutter_distributor
+          
+      - name: Build macOS
+        script: |
+          cd simple_live_app
+          flutter_distributor package --platform macos --targets dmg,zip --skip-clean
+          
+      # 合并 macOS 产物到一个压缩包
+      - name: Package macOS artifacts
+        script: |
+          cd simple_live_app
+          # 获取版本号
+          VERSION=$(grep 'version:' pubspec.yaml | sed 's/version: //' | tr -d ' ')
+          # 创建临时目录
+          mkdir -p SimpleLive-Mac
+          # 复制 dmg 和 zip 到临时目录
+          cp build/dist/$VERSION/*.dmg SimpleLive-Mac/ 2>/dev/null || true
+          cp build/dist/$VERSION/*.zip SimpleLive-Mac/ 2>/dev/null || true
+          # 创建最终的压缩包
+          zip -r SimpleLive-Mac.zip SimpleLive-Mac
+          # 清理临时目录
+          rm -rf SimpleLive-Mac
+          
+    artifacts:
+      - simple_live_app/SimpleLive-iOS.ipa
+      - simple_live_app/SimpleLive-Mac.zip

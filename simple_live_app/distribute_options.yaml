@@ -1,0 +1,16 @@
+output: build/dist/
+releases:
+  - name: dev
+    jobs:
+      - name: release-macos-dmg
+        package:
+          platform: macos
+          target: dmg
+        publish:
+          target: none
+      - name: release-macos-zip
+        package:
+          platform: macos
+          target: zip
+        publish:
+          target: none

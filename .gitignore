@@ -1,0 +1,82 @@
+# ============= 通用 =============
+*.DS_Store
+*.log
+*.swp
+Thumbs.db
+.idea/
+.vscode/settings.json
+simple_live_app/.vscode/settings.json
+simple_live_tv_app/.vscode/settings.json
+
+# ============= Flutter / Dart =============
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/build/
+**/pubspec.lock.bak
+
+# ============= Android =============
+**/android/.gradle/
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/key.properties
+**/android/app/release/
+**/android/app/debug/
+**/android/app/profile/
+*.jks
+*.keystore
+
+# ============= iOS / macOS =============
+**/ios/Flutter/App.framework/
+**/ios/Flutter/Flutter.framework/
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/ios/Pods/
+**/ios/.symlinks/
+**/macos/Flutter/ephemeral/
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/macos/Flutter/Flutter-Generated.xcconfig
+**/macos/Pods/
+**/Podfile.lock
+
+# ============= Windows / Linux =============
+**/windows/flutter/ephemeral/
+**/windows/flutter/generated_plugin_registrant.*
+**/windows/flutter/generated_plugins.cmake
+**/linux/flutter/ephemeral/
+**/linux/flutter/generated_plugin_registrant.*
+**/linux/flutter/generated_plugins.cmake
+
+# ============= 项目自身构建/打包产物 =============
+Release/
+Release-zip/
+*.zip
+*.7z
+*.rar
+*.apk
+*.aab
+*.exe
+*.msix
+*.dmg
+*.deb
+*.rpm
+
+# ============= 临时/调试 =============
+.tmp_*
+*.tmp
+.history/
+coverage/
+doc/api/

@@ -1,0 +1,642 @@
+关于登录：
+请求：https://id.kuaishou.com/rest/c/infra/ks/qr/start
+响应：{
+    "result": 1,
+    "expireTime": 1778409444417,
+    "qrUrl": "http://qr.kuaishou.com/l/640SqIVQqmGtPzFm",
+    "qrLoginSignature": "Xf9NAojrxo",
+    "imageData": "iVBORw0KGgoAAAANSUhEUgAAAH0AAAB9AQAAAACn+1GIAAABxElEQVR4Xr2VP470IAzFHVHQJReIxDXouFJygSRzgeRKdFwDiQtsuhQI74MZfX+aNdVGKJr8Cts822+I/38e+h1QiEZSr4dPZw5SXcDxxURk2o/UBay6nnl/zOHMSb3gJFW0uYPqB1fIewvTC1CgT3eIk/9bugCgh01nO38E+hlUqT1ypkO/Ve8ATxydOm0kHfeQekDR8+Zi7VX4VCoC5CSXvvQ8Eo7pAUXTRoo9DZyuUG8rA8pTMLePU6jJewAzrYFvpsHTprtAcXl4IAYNIU9cK5WBnReXDpcX5Pc1hgiY58nnIagCVeoEyaBoLqROjQDmbmlFANVHF3evLq6nE2CuR61eULFVKoLias7Vo8y46WoGIsBZyNQv4ndaGbA5HRYIHZ6HPgAxiotriBuW76l1iIAD5tR8WVhOpDZBMmBT8PKZCGuRekCxNDFNT1zQq7ZzIuAQF8sc4DeqbYMMimW0iKhNa1sPEcAzMG7FxsFDmC4Al8IUwNtgUWe7nAwc/gTyynwg0sc+JVBNOmNBi45kW+kd4Arz6uFStb2dAGl3mIdOr3cbRIDBCeaFGJjuz+UkUPVgaA/r3VobRFDN/J/nl8A3VcecXkDYvqkAAAAASUVORK5CYII=",
+    "callback": "",
+    "qrLoginToken": "640SqIVQqmGtPzFm",
+    "sid": "kuaishou.live.web"
+}
+
+
+请求：https://id.kuaishou.com/rest/c/infra/ks/qr/scanResult
+响应：{
+    "result": 1,
+    "user": {
+        "following": true,
+        "user_name": "追风少年吉某人",
+        "user_id": 10483693,
+        "user_sex": "M",
+        "headurls": [
+            {
+                "cdn": "p2-pro.a.yximgs.com",
+                "url": "https://p2-pro.a.yximgs.com/uhead/AB/2021/11/30/11/BMjAyMTExMzAxMTEyMjBfMTA0ODM2OTNfMV9oZDEwN18xNTU=_s.jpg"
+            },
+            {
+                "cdn": "p1-pro.a.yximgs.com",
+                "url": "https://p1-pro.a.yximgs.com/uhead/AB/2021/11/30/11/BMjAyMTExMzAxMTEyMjBfMTA0ODM2OTNfMV9oZDEwN18xNTU=_s.jpg"
+            }
+        ],
+        "headurl": "https://p2-pro.a.yximgs.com/uhead/AB/2021/11/30/11/BMjAyMTExMzAxMTEyMjBfMTA0ODM2OTNfMV9oZDEwN18xNTU=_s.jpg",
+        "privacy": true,
+        "eid": "3xsdnab6r256z8g",
+        "visitorBeFollowed": false
+    }
+}
+
+请求：https://id.kuaishou.com/rest/c/infra/ks/qr/acceptResult
+响应：{
+    "result": 1,
+    "qrToken": "ChRrdWFpc2hvdS5xci5sb2dpbi5hdBKAAYX7B84GgONWvrPuRk5fpwggIL3KAxR9ePN_8UUMBZkZZz5ejPMccBr5aLSWQiU2u5_4sXIugylXsk4FgdJCqeDnn49eZ6MCve4bPCguYTVvhPvdUqcqXlUAByN6kqjvMwTvDxm8mex4TOrRGq6MlV9ZbFcDZwpAx_5F6dxqsFSFGhKS15x5WrVBqrsbJMscxbO28z8iIA9tZHMl85glrMjLRDJu_ZtUecKxbGiDyz6hHwcf3K1FKAUwAQ",
+    "callback": "",
+    "sid": "kuaishou.live.web"
+}
+请求：
+https://id.kuaishou.com/pass/kuaishou/login/qr/callback
+响应：{
+    "result": 1,
+    "ssecurity": "UNrpD+SYe/cFJQMVw0rSPg==",
+    "passToken": "ChNwYXNzcG9ydC5wYXNzLXRva2VuErABwwd7gWbCxG4idj6jf9fsSACnyTFKxlHGDkm8yXvh0038bLlmsaKwzZSyaIhX2EZLb8EXe1YLjcqqGPhEbmk-VM0StIMaqHuKYNXonaJVaQS7r-28UhaKMvCL2iOhMb0cZHCRdO1PWz-9ut7h6wFJeJWe5NYe09YN7pjNBbn8H_uvUjbL6u1R5yfACmdFxxMBKKhDevF5NuaTrRsYMez3K7pgOiKAOxsXHcR0hWpxoN0aEgkFF-v-qk7Oq0WzNNyIan9OdiIgg73MoN3IMJFcdojbOiho4hfXiswkWtFatgk1OOonCFooBTAB",
+    "stsUrl": "",
+    "followUrl": "",
+    "bUserId": 0,
+    "kuaishou.live.web_st": "ChRrdWFpc2hvdS5saXZlLndlYi5zdBKgAeWfhkMyyKp9sXF3e5fqPmo7P4WUVTTfqCkkZA9IhUbkapjSJxEWqhyIZQ0QMI4Hwp6WChAy-1mzhcrZuxGBnQvc1ola-lrommVh9bdmjSqLaHus5UbvD1v6UDM21rj4aRkqCqN-EufMDZo07UccMZ7SLJDWuqhLpZTUPKlXvkqgyft1BfaCb9DK-bvULsWbEg8Mz0fHD7mz-B-GHnaLJesaEiWGLfbrnUkCqTgL7M-vFrp6OSIg6hZYIU7dLoDgfPs6eRMz6M0pyn4q8x7TI46gO6Y-bCIoBTAB",
+    "userId": 10483693,
+    "kuaishou.live.web.at": "ChRrdWFpc2hvdS5saXZlLndlYi5hdBLAAeEtcr99RLFIgrHjCn1WcWiQ74At_vB-8SQeEFytcg24hK-eycveJc70Ig3XgM6Yqr4a8r-IfrpwcxBMZmVJWOXVxOGFoXsbrbxDK5_HHsaEo6-ptR7MCyCCI2ijw4gnN3XqL6GSWVc_XSkGsNWqdSYIPDfX2EXxiHIpOfwPachqN2ZfIrpc-VXvjkFfdK_lK_RKPHI4Ga1iYGgKnaLoLzjYIuGj0zfCCHztCKOJ1hPkUiSYk6pA6UEAOEG4MS7SohoSwsV7tmvTQ8aMDiU6OE6eZwNjIiCb2KkgcD-yNg8bNrRM9OA_dwhQfafq7Tq9NeR5UlwHfCgFMAE",
+    "sid": "kuaishou.live.web"
+}
+请求：https://live.kuaishou.com/live_api/baseuser/userLogin?__NS_hxfalcon=HUDR_sFnX-DtsB0FXsbDPT3TMP-sk0is9B7dAtQleg__VsxK3cJBScjfyoZuJDKCd0dFhpVOXKHFtTrFSOUNZnJTTlJFc98xCkEx5ZgnSHUamh8T1mQj2KahjLiczzokoUjRZRuNDLUKDy7uDbgFTk0LdBXDB7Eldht5J-bUlhQif$HE_918e1773716721a8cb44db8402d273f322dbdadadadb05427660cd57a96b1eb8e50344db418ce400a18ce432da&caver=2
+响应：{"data":{"result":1}}
+请求：
+https://live.kuaishou.com/live_api/baseuser/userinfo
+响应：{
+    "data": {
+        "ownerInfo": {
+            "id": "3xsdnab6r256z8g",
+            "name": "追风少年吉某人",
+            "description": "",
+            "avatar": "https://p4-pro.a.yximgs.com/uhead/AB/2021/11/30/11/BMjAyMTExMzAxMTEyMjBfMTA0ODM2OTNfMV9oZDEwN18xNTU=_s.jpg",
+            "sex": "M",
+            "constellation": "",
+            "cityName": "",
+            "originUserId": 10483693,
+            "privacy": true,
+            "isNew": false,
+            "timestamp": 1778409388592,
+            "verifiedStatus": {
+                "verified": false,
+                "description": "",
+                "type": 0,
+                "new": false,
+                "iconUrl": ""
+            },
+            "bannedStatus": {
+                "banned": false,
+                "socialBanned": false,
+                "isolate": false,
+                "defriend": false
+            },
+            "counts": {
+                "fan": "8",
+                "follow": "17",
+                "photo": 0,
+                "playback": 0,
+                "liked": 136,
+                "private": 0,
+                "review": 0,
+                "open": 0
+            },
+            "isAdult": true
+        },
+        "kshellBalance": {
+            "result": 1,
+            "kshell": 40,
+            "host-name": "public-bjmt-c34-kce-node2203.idchb1az4.hb1.kwaidc.com"
+        }
+    }
+}
+
+浏览器中请求为：https://live.kuaishou.com/search?keyword=北慕
+F12请求为：https://live.kuaishou.com/live_api/search/author?__NS_hxfalcon=HUDR_sFnX-DtsB0FXsbDPTnTMP-sk0is9B7dAtQleg__VsxK3cJBScjfyoZuJDKCd0dFhpVOXKHFtTrFSOUNZnJTTlJFc98xCkEx5ZgnSHUamh8T1mQj2KahjLiczzokoUjRZRuNDLUKDy7uDbgFTk0LdBXDB7Eldht5J-bUkhQif$HE_bea1385c5e480e87e46bf4163cebef72ddf4f5f5f5f42b6d594fee7fd3459b95ca2c6bf46ea3cb2f8ea3cb1df5&caver=2&count=15&key=%E5%8C%97%E6%85%95&keyword=%E5%8C%97%E6%85%95&lssid=&page=1&ussid=MV8wXzE3Nzg0MDkxODc1NjVf5YyX5oWVXzU4OTE
+响应：{
+    "data": {
+        "type": "authors",
+        "list": [
+            {
+                "id": "beimu0315",
+                "name": "王者荣耀北慕（134段）",
+                "description": "七点\n账号靠谱交易@游可易账号\n王者荣耀3赛季巅峰第一，3赛季第二\n2w3战力露娜镜，露娜天花板\n粉丝群加助理v：Dongc_2230\n工作室V：7840104\n商务合作vx：WYJ735817228（带合作项目）\n陪🥣v：beimuu315\n投诉建议：40808116",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2025/01/16/18/BMjAyNTAxMTYxODUxNTBfMTMyODY1Mzk2MV8xX2hkMzMzXzU2NA==_s.jpg",
+                "sex": "M",
+                "living": true,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "摩羯座",
+                "cityName": "浙江 台州市",
+                "originUserId": 1328653961,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "588.9w",
+                    "photo": 2915,
+                    "follow": "274",
+                    "playback": 612,
+                    "open": 2915
+                }
+            },
+            {
+                "id": "shb158398",
+                "name": "北慕",
+                "description": "以前",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2026/04/30/18/BMjAyNjA0MzAxODU0MzlfNDQxOTY4Njk0N18xX2hkNDIxXzIzMA==_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "水瓶座",
+                "cityName": "河北",
+                "originUserId": 4419686947,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "1.1w",
+                    "photo": 49,
+                    "follow": "9253",
+                    "playback": 0,
+                    "open": 49
+                }
+            },
+            {
+                "id": "XQ582462",
+                "name": "北慕",
+                "description": "活在当下",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2026/03/17/21/BMjAyNjAzMTcyMTAyMzRfNDY2MjcxMzE3XzJfaGQyMzVfNjQ3_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "白羊座",
+                "cityName": "云南 丽江市",
+                "originUserId": 466271317,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "450",
+                    "photo": 5,
+                    "follow": "291",
+                    "playback": 0,
+                    "open": 5
+                }
+            },
+            {
+                "id": "ww6690513376",
+                "name": "北慕",
+                "description": "遇见你真好",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2024/09/17/13/BMjAyNDA5MTcxMzAwNTNfMTExODM5NzI4M18yX2hkODkzXzQ0NQ==_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "金牛座",
+                "cityName": "广东 东莞市",
+                "originUserId": 1118397283,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "2110",
+                    "photo": 146,
+                    "follow": "542",
+                    "playback": 0,
+                    "open": 146
+                }
+            },
+            {
+                "id": "H000g000z",
+                "name": "北慕",
+                "description": "",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2026/05/09/01/BMjAyNjA1MDkwMTEzMjhfODY0NTUxOTcyXzJfaGQzODRfNDUx_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "处女座",
+                "cityName": "甘肃 兰州市",
+                "originUserId": 864551972,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "1334",
+                    "photo": 0,
+                    "follow": "1270",
+                    "playback": 0
+                }
+            },
+            {
+                "id": "LiJiaJun2007-4-14",
+                "name": "北慕",
+                "description": "我的性格 为难你了",
+                "avatar": "https://p4-pro.a.yximgs.com/uhead/AB/2025/04/17/09/BMjAyNTA0MTcwOTM2MjNfMTY2OTIzNDg4M18xX2hkNzdfMTg5_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "白羊座",
+                "cityName": "安徽",
+                "originUserId": 1669234883,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "377",
+                    "photo": 0,
+                    "follow": "88",
+                    "playback": 0
+                }
+            },
+            {
+                "id": "a168564325",
+                "name": "北慕🌊",
+                "description": "·",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2025/09/27/00/BMjAyNTA5MjcwMDI2NDFfMjU2MjA0MjI0MV8yX2hkMjI3XzE4NQ==_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "狮子座",
+                "cityName": "新疆",
+                "originUserId": 2562042241,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "2061",
+                    "photo": 0,
+                    "follow": "160",
+                    "playback": 0
+                }
+            },
+            {
+                "id": "gua666639",
+                "name": "北慕",
+                "description": "12345，北慕1米5    \n他哥的1000粉丝\n直接从地面挖到基岩层。",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2021/10/06/20/BMjAyMTEwMDYyMDU5MDFfMTk4NjE3MjAyMV8yX2hkODcyXzg2MA==_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "金牛座",
+                "cityName": "湖南 长沙市",
+                "originUserId": 1986172021,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "539",
+                    "photo": 7,
+                    "follow": "2325",
+                    "playback": 0,
+                    "open": 7
+                }
+            },
+            {
+                "id": "Fedor-Von-Bock-8045",
+                "name": "TA",
+                "description": "",
+                "avatar": "https://p4.a.yximgs.com/s1/i/def/head_u.png",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "狮子座",
+                "cityName": "浙江 嘉兴市",
+                "originUserId": 1944516978,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "2.5w",
+                    "photo": 109,
+                    "follow": "80",
+                    "playback": 0,
+                    "open": 109
+                }
+            },
+            {
+                "id": "xiaowu3577",
+                "name": "北慕",
+                "description": "",
+                "avatar": "https://p4-pro.a.yximgs.com/uhead/AB/2025/08/24/09/BMjAyNTA4MjQwOTM3MzNfMjIyMTQxMzcxXzJfaGQyMjhfNTY3_s.jpg",
+                "sex": "U",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "双子座",
+                "cityName": "",
+                "originUserId": 222141371,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "4.3w",
+                    "photo": 6,
+                    "follow": "247",
+                    "playback": 0,
+                    "open": 6
+                }
+            },
+            {
+                "id": "3x4uqin8y749ywc",
+                "name": "北慕",
+                "description": "",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2026/04/05/23/BMjAyNjA0MDUyMzA2MTNfMjU4MjMzNzI1OV8yX2hkMjQ1XzcwNA==_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "",
+                "cityName": "",
+                "originUserId": 2582337259,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "334",
+                    "photo": 0,
+                    "follow": "323",
+                    "playback": 0
+                }
+            },
+            {
+                "id": "Miiiiiii78xl",
+                "name": "北慕",
+                "description": "一",
+                "avatar": "https://p4-pro.a.yximgs.com/uhead/AB/2026/05/07/09/BMjAyNjA1MDcwOTMwNDhfMjI1NjIyOTQ4OV8xX2hkNzQ5XzUxOQ==_s.jpg",
+                "sex": "M",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "巨蟹座",
+                "cityName": "陕西",
+                "originUserId": 2256229489,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "1369",
+                    "photo": 9,
+                    "follow": "144",
+                    "playback": 0,
+                    "open": 9
+                }
+            },
+            {
+                "id": "3xapd23njygfcsq",
+                "name": "北慕",
+                "description": "",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2024/10/14/20/BMjAyNDEwMTQyMDM3MjhfMjY0Njc3NTgzN18xX2hkODcyXzQx_s.jpg",
+                "sex": "U",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "",
+                "cityName": "青海 海北藏族自治州",
+                "originUserId": 2646775837,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "410",
+                    "photo": 0,
+                    "follow": "327",
+                    "playback": 0
+                }
+            },
+            {
+                "id": "ManYanDouShiNiMen",
+                "name": "北慕",
+                "description": "努力不会被埋没",
+                "avatar": "https://p2-pro.a.yximgs.com/uhead/AB/2025/10/05/23/BMjAyNTEwMDUyMzA3MzFfMTY0NjUzMDA5XzFfaGQzNl8yOTQ=_s.jpg",
+                "sex": "F",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "水瓶座",
+                "cityName": "北京 朝阳区",
+                "originUserId": 164653009,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "4209",
+                    "photo": 18,
+                    "follow": "210",
+                    "playback": 0,
+                    "open": 18
+                }
+            },
+            {
+                "id": "a577437999",
+                "name": "北慕",
+                "description": "",
+                "avatar": "https://p5-pro.a.yximgs.com/uhead/AB/2017/07/18/11/BMjAxNzA3MTgxMTQzMDNfNTg1Nzk5NDM1XzJfaGQ3OTRfNjU5.jpg",
+                "sex": "F",
+                "living": false,
+                "followStatus": "UN_FOLLOWED",
+                "constellation": "水瓶座",
+                "cityName": "河北 承德市",
+                "originUserId": 585799435,
+                "privacy": false,
+                "isNew": false,
+                "timestamp": 1778409389111,
+                "verifiedStatus": {
+                    "verified": false,
+                    "description": "",
+                    "type": 0,
+                    "new": false,
+                    "iconUrl": ""
+                },
+                "bannedStatus": {
+                    "banned": false,
+                    "socialBanned": false,
+                    "isolate": false,
+                    "defriend": false
+                },
+                "counts": {
+                    "fan": "2714",
+                    "photo": 44,
+                    "follow": "4606",
+                    "playback": 0,
+                    "open": 44
+                }
+            }
+        ],
+        "ussid": "MV8xMDQ4MzY5M18xNzc4NDA5Mzg5MDk3X-WMl-aFlV82MzYz",
+        "result": 1
+    }
+}

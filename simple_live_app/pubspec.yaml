@@ -1,0 +1,164 @@
+name: simple_live_app
+version: 1.11.2+11102
+publish_to: none
+description: "Simple Live APP"
+environment:
+  sdk: ">=3.0.5 <4.0.0"
+
+dependencies:
+  simple_live_core:
+    path: ../simple_live_core
+  # 图标
+  cupertino_icons: ^1.0.2
+  remixicon: ^1.2.0 #Remix图标
+
+  # 框架、工具
+  get: ^4.6.6 #状态管理、路由管理、国际化
+  dio: ^5.4.3+1 #网络请求
+  hive: 2.2.3 #持久化存储
+  hive_flutter: 1.1.0 #持久化存储
+  logger: ^2.0.2 #日志
+  intl: ^0.20.2 #国际化
+  qr_flutter: ^4.1.0 #二维码生成
+  dynamic_color: 1.6.8 #动态颜色
+  path: any
+  collection: any
+  udp: ^5.0.3 #UDP
+  uuid: ^4.3.3 #UUID
+  webdav_client: ^1.2.2 # WebDAV
+  archive: ^3.6.1 #文件压缩
+  crypto: ^3.0.6
+
+  #Widget
+  flutter_staggered_grid_view: ^0.7.0 #瀑布流/GridView
+  flutter_easyrefresh: 2.2.2 #下拉刷新、上拉加载
+  extended_image: ^9.1.0 #拓展Image,支持缓存
+  flutter_smart_dialog: ^4.9.2 #各种弹窗 Toast/Dialog/Popup
+  sticky_headers: ^0.3.0+2 #吸顶
+  lottie: ^1.4.3 #lottie动画
+  ns_danmaku: #弹幕
+    git:
+      url: https://github.com/xiaoyaocz/flutter_ns_danmaku.git
+      tag: v0.0.9
+
+  #系统交互
+  package_info_plus: ^8.3.0 #包信息
+  device_info_plus: ^10.1.0 #设备信息
+  url_launcher: ^6.3.1 #打开链接
+  share_plus: ^10.1.4 #分享
+  path_provider: ^2.1.5 #常用路径
+  cross_file: ^0.3.4+2 #跨平台文件
+  permission_handler: ^11.3.1 #权限处理
+  image_gallery_saver: ^2.0.3 #图片保存到相册
+  screen_brightness: ^2.1.2 #亮度控制
+  auto_orientation_v2: ^2.3.6 #屏幕方向
+  wakelock_plus: ^1.2.11 #屏幕常亮
+  file_picker: ^8.0.3 #文件选择
+  window_manager: ^0.4.3 #窗口管理
+  floating: ^6.0.0 #PIP画中画
+  flutter_inappwebview: ^5.8.0 #WebView
+  connectivity_plus: ^6.1.3 #网络状态
+  qr_code_scanner: ^1.0.1 #二维码扫描
+  volume_controller: ^2.0.7 #音量控制
+  flutter_js: ^0.8.5
+
+  # 网络相关
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  network_info_plus: ^6.1.3
+  signalr_netcore: ^1.3.9 #SignalR
+
+  # 视频播放 - 使用 Predidit/media-kit fork
+  # 该 fork 合并了 ffmpeg 树外补丁，可播放非标准视频流，更新了 mpv 版本
+  media_kit:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./media_kit
+  media_kit_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./media_kit_video
+  media_kit_libs_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./libs/universal/media_kit_libs_video
+
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+dependency_overrides:
+  screen_brightness: ^2.1.2
+  screen_brightness_android: 2.1.2
+  # 解决 media_kit 和 qr_code_scanner 的 js 版本冲突
+  js: ^0.7.1
+  # media_kit 相关依赖全部使用 Predidit fork
+  media_kit:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./media_kit
+  media_kit_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./media_kit_video
+  media_kit_libs_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./libs/universal/media_kit_libs_video
+  media_kit_libs_linux:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./libs/linux/media_kit_libs_linux
+  media_kit_libs_ios_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./libs/ios/media_kit_libs_ios_video
+  media_kit_libs_android_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./libs/android/media_kit_libs_android_video
+  media_kit_libs_windows_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./libs/windows/media_kit_libs_windows_video
+  media_kit_libs_macos_video:
+    git:
+      url: https://github.com/Predidit/media-kit.git
+      ref: main
+      path: ./libs/macos/media_kit_libs_macos_video
+
+dev_dependencies:
+  flutter_lints: ^2.0.0
+  build_runner: ^2.3.3
+  hive_generator: ^2.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_test:
+    sdk: flutter
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  min_sdk_android: 21
+  macos:
+    generate: true
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/statement.txt
+    - assets/images/
+    - assets/icons/
+    - assets/lotties/
+    - assets/scripts/

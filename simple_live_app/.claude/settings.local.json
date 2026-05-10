@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Users/Administrator/Desktop/SimpleLive/simple_live_app/lib/**/*.dart)",
+      "Bash(flutter analyze:*)"
+    ]
+  }
+}
