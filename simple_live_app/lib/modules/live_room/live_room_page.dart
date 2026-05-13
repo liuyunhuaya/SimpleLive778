@@ -895,6 +895,18 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   List<Widget> buildAppbarActions(BuildContext context) {
     return [
+      if (Platform.isWindows)
+        Obx(
+          () => IconButton(
+            tooltip: controller.isAlwaysOnTop.value ? "取消置顶" : "窗口置顶",
+            onPressed: controller.toggleAlwaysOnTop,
+            icon: Icon(
+              controller.isAlwaysOnTop.value
+                  ? Icons.push_pin
+                  : Icons.push_pin_outlined,
+            ),
+          ),
+        ),
       IconButton(
         onPressed: () {
           showMore();

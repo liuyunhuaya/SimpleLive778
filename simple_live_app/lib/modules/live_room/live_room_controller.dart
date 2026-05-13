@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
@@ -128,6 +130,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     showDanmakuState.value = AppSettingsController.instance.danmuEnable.value;
     followed.value = DBService.instance.getFollowExist("${site.id}_$roomId");
     loadData();
+    _initAudioSession();
 
     scrollController.addListener(scrollListener);
 
@@ -1082,6 +1085,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     // 重新设置LiveDanmaku
     liveDanmaku = site.liveSite.getDanmaku();
 
+    // 清除榜单数据
+    liveRankResult.value = null;
+
     // 停止播放
     await player.stop();
 
@@ -1099,6 +1105,38 @@ $error''');
 
   /// 后台时音量降低前的原始音量
   double? _volumeBeforeBackground;
+  StreamSubscription<AudioInterruptionEvent>? _audioInterruptionSub;
+
+  void _initAudioSession() async {
+    if (!Platform.isIOS) return;
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.music());
+    _audioInterruptionSub = session.interruptionEventStream.listen((event) {
+      if (event.begin) {
+        // 其他 App 开始占用音频（如微信语音）
+        if (!isManualPaused.value) {
+          try {
+            final cur = AppSettingsController.instance.playerVolume.value;
+            _volumeBeforeBackground = cur;
+            final reduced = (cur * 0.3).clamp(5.0, 100.0);
+            player.setVolume(reduced);
+          } catch (e) {
+            Log.logPrint(e);
+          }
+        }
+      } else {
+        // 其他 App 释放音频焦点
+        if (_volumeBeforeBackground != null) {
+          try {
+            player.setVolume(_volumeBeforeBackground!);
+          } catch (e) {
+            Log.logPrint(e);
+          }
+          _volumeBeforeBackground = null;
+        }
+      }
+    });
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -1121,21 +1159,9 @@ $error''');
       // 3. 关闭屏幕常亮
       WakelockPlus.disable();
 
-      // 4. iOS：拍照/微信等场景仍允许后台播放，仅降低音量并保持音频
+      // 4. iOS 后台不降音（由 audio_session 中断事件处理）
       //    其它平台（Android/桌面）按设置项决定是否暂停
-      if (Platform.isIOS) {
-        if (!isManualPaused.value) {
-          try {
-            final cur = AppSettingsController.instance.playerVolume.value;
-            _volumeBeforeBackground = cur;
-            // 后台音量降到原音量的 30%，最低 5
-            final reduced = (cur * 0.3).clamp(5.0, 100.0);
-            player.setVolume(reduced);
-          } catch (e) {
-            Log.logPrint(e);
-          }
-        }
-      } else {
+      if (!Platform.isIOS) {
         if (AppSettingsController.instance.playerAutoPause.value &&
             !isManualPaused.value) {
           try {
@@ -1148,16 +1174,6 @@ $error''');
     } else if (state == AppLifecycleState.resumed) {
       Log.d("返回前台");
       isBackground = false;
-
-      // iOS：恢复后台前的音量
-      if (Platform.isIOS && _volumeBeforeBackground != null) {
-        try {
-          player.setVolume(_volumeBeforeBackground!);
-        } catch (e) {
-          Log.logPrint(e);
-        }
-        _volumeBeforeBackground = null;
-      }
 
       // 非 iOS：若是自动暂停模式且未被用户手动暂停，则恢复播放
       if (!Platform.isIOS &&
@@ -1290,6 +1306,16 @@ $error''');
   /// 是否正在加载榜单
   var isLoadingRank = false.obs;
 
+  /// Windows 窗口置顶状态
+  var isAlwaysOnTop = false.obs;
+
+  void toggleAlwaysOnTop() async {
+    if (!Platform.isWindows) return;
+    isAlwaysOnTop.value = !isAlwaysOnTop.value;
+    await windowManager.setAlwaysOnTop(isAlwaysOnTop.value);
+    SmartDialog.showToast(isAlwaysOnTop.value ? "已开启窗口置顶" : "已关闭窗口置顶");
+  }
+
   /// 拉取榜单数据，每次点击会强制刷新
   Future<void> fetchLiveRanks() async {
     if (detail.value == null || isLoadingRank.value) return;
@@ -1381,8 +1407,9 @@ $error''');
 
     liveDanmaku.stop();
     danmakuController = null;
-    _liveDurationTimer?.cancel(); // 页面关闭时取消定时器
-    _onlineRefreshTimer?.cancel(); // 页面关闭时取消人数刷新定时器
+    _liveDurationTimer?.cancel();
+    _onlineRefreshTimer?.cancel();
+    _audioInterruptionSub?.cancel();
     super.onClose();
   }
 }

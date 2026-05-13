@@ -158,9 +158,13 @@ class FollowUserItem extends StatelessWidget {
                     Row(
                       children: [
                         // 平台logo
-                        Image.asset(
-                          site.logo,
-                          width: 16,
+                        ClipOval(
+                          child: Image.asset(
+                            site.logo,
+                            width: 16,
+                            height: 16,
+                            fit: BoxFit.cover,
+                          ),
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -204,8 +208,7 @@ class FollowUserItem extends StatelessWidget {
                         ),
                         // 开播时间
                         if (item.liveStatus.value == 2 &&
-                            item.liveStartTime != null &&
-                            !playing)
+                            item.liveStartTime != null)
                           Padding(
                             padding: const EdgeInsets.only(left: 6),
                             child: Text(

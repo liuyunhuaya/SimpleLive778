@@ -277,14 +277,15 @@ class KuaishouSite implements LiveSite {
   Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
     Map? state;
     Map firstNode = const {};
-    // 最多尝试 2 次：第一次失败/拿到 errorType=22 时强制重置 cookie 重试
-    for (int attempt = 0; attempt < 2; attempt++) {
+    // 最多尝试 3 次：第一次失败/拿到 errorType=22 时强制重置 cookie 重试
+    for (int attempt = 0; attempt < 3; attempt++) {
       await _ensureCookie(force: attempt > 0);
       state = await _fetchRoomState(roomId);
       if (state == null) {
-        if (attempt == 1) {
+        if (attempt == 2) {
           throw Exception("快手直播间数据解析失败，请稍后重试");
         }
+        await Future.delayed(const Duration(milliseconds: 500));
         continue;
       }
       firstNode = _resolvePlayListFirst(state);
@@ -292,7 +293,10 @@ class KuaishouSite implements LiveSite {
       final err = firstNode["errorType"];
       final errType = (err is Map) ? err["type"] : null;
       if (errType == 22 || errType == "22") {
-        if (attempt == 0) continue; // 触发重试
+        if (attempt < 2) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
       }
       break;
     }
@@ -306,7 +310,9 @@ class KuaishouSite implements LiveSite {
     final config = (firstNode["config"] ?? const {}) as Map;
     final isLive = firstNode["isLiving"] == true ||
         liveStream["isLive"] == true ||
-        liveStream["status"]?.toString() == "1";
+        liveStream["status"]?.toString() == "1" ||
+        liveStream["status"]?.toString() == "LIVING" ||
+        (liveStream["id"]?.toString() ?? "").isNotEmpty;
 
     // 合并 liveStream + config 为 data，保证清晰度提取能访问 multiResolutionPlayUrls
     // 注意：config.watchingCount 才是页面 top-count 实时在线观众数，

@@ -149,6 +149,26 @@ class FollowUserPage extends GetView<FollowUserController> {
               ],
             ),
           ),
+          // 平台分类按钮行（仅当有多个平台时显示）
+          Obx(() {
+            final siteIds = controller.activeSiteIds;
+            if (siteIds.length <= 1) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildSiteFilterChip(context, null, "全部"),
+                    ...siteIds.map((id) {
+                      final site = Sites.allSites[id]!;
+                      return _buildSiteFilterChip(context, id, site.name, logo: site.logo);
+                    }),
+                  ],
+                ),
+              ),
+            );
+          }),
           Expanded(
             child: PageGridView(
               crossAxisSpacing: 12,
@@ -183,8 +203,48 @@ class FollowUserPage extends GetView<FollowUserController> {
     );
   }
 
+  Widget _buildSiteFilterChip(BuildContext context, String? siteId, String label, {String? logo}) {
+    return Obx(() {
+      final selected = controller.filterSiteId.value == siteId;
+      return GestureDetector(
+        onTap: () => controller.setSiteFilter(siteId),
+        child: Container(
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: selected
+                ? Theme.of(context).colorScheme.primary.withAlpha(30)
+                : Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey.withAlpha(60),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (logo != null) ...[
+                ClipOval(child: Image.asset(logo, width: 14, height: 14, fit: BoxFit.cover)),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: selected ? Theme.of(context).colorScheme.primary : null,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
+  }
+
   void setFollowTagDialog(FollowUser item) {
-    /// 控制单选ui
     List<FollowUserTag> copiedList = [
       controller.tagList.first,
       ...controller.tagList.skip(3),

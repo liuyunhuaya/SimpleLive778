@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/event_bus.dart';
 import 'package:simple_live_app/app/log.dart';
+import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
 import 'package:simple_live_app/models/db/follow_user_tag.dart';
@@ -79,16 +80,33 @@ class FollowUserController extends BasePageController<FollowUser> {
   }
 
   void filterData() {
+    List<FollowUser> base;
     if (filterMode.value.tag == "全部") {
-      list.assignAll(FollowService.instance.followList.value);
+      base = FollowService.instance.followList.value;
     } else if (filterMode.value.tag == "直播中") {
-      list.assignAll(FollowService.instance.liveList.value);
+      base = FollowService.instance.liveList.value;
     } else if (filterMode.value.tag == "未开播") {
-      list.assignAll(FollowService.instance.notLiveList.value);
+      base = FollowService.instance.notLiveList.value;
     } else {
       FollowService.instance.filterDataByTag(filterMode.value);
-      list.assignAll(FollowService.instance.curTagFollowList);
+      base = FollowService.instance.curTagFollowList.toList();
     }
+    final siteId = filterSiteId.value;
+    list.assignAll(siteId == null ? base : base.where((u) => u.siteId == siteId).toList());
+  }
+
+  /// 当前平台筛选（null = 全部平台）
+  Rx<String?> filterSiteId = Rx<String?>(null);
+
+  /// 获取关注列表中实际存在的平台列表（按 allSites 顺序）
+  List<String> get activeSiteIds {
+    final ids = FollowService.instance.followList.map((u) => u.siteId).toSet();
+    return Sites.allSites.keys.where((k) => ids.contains(k)).toList();
+  }
+
+  void setSiteFilter(String? siteId) {
+    filterSiteId.value = siteId;
+    filterData();
   }
 
   void setFilterMode(FollowUserTag tag) {

@@ -60,6 +60,7 @@ dependencies:
   connectivity_plus: ^6.1.3 #网络状态
   qr_code_scanner: ^1.0.1 #二维码扫描
   volume_controller: ^2.0.7 #音量控制
+  audio_session: ^0.1.21 #音频会话/中断监听
   flutter_js: ^0.8.5
 
   # 网络相关
