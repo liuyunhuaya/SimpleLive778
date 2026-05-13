@@ -90,6 +90,12 @@ class LocalStorageService extends GetxService {
   /// 需要一个不同的 key，因为用户在房间内设置的倒计时和全局的可能不同。
   static const String kRoomAutoExitDuration = "RoomAutoExitDuration";
 
+  /// 定时关闭模式：0=倒计时（指定时长），1=定时（指定时间点）
+  static const String kAutoExitMode = "AutoExitMode";
+
+  /// 定时关闭目标时间点（一天中的分钟数，0-1439）
+  static const String kAutoExitTargetMinutes = "AutoExitTargetMinutes";
+
   /// 播放器兼容模式
   static const String kPlayerCompatMode = "PlayerCompatMode";
 

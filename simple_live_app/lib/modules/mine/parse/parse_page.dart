@@ -95,7 +95,7 @@ class ParsePage extends GetView<ParseController> {
           ),
           const Padding(
             padding: AppStyle.edgeInsetsV12,
-            child: SelectableText('''支持以下类型的链接解析：
+            child: SelectableText('''支持以下类型的链接解析（可直接粘贴包含中文的整段分享文案）：
 哔哩哔哩：
 https://live.bilibili.com/xxxxx
 https://b23.tv/xxxxx
@@ -112,6 +112,7 @@ https://webcast.amemv.com/webcast/reflow/xxxxx
 https://live.kuaishou.com/u/xxxxx
 https://www.kuaishou.com/profile/xxxxx
 https://v.kuaishou.com/xxxxx
+https://v.m.chenzhongtech.com/fw/live/xxxxx
 ''', style: TextStyle(color: Colors.grey)),
           ),
         ],

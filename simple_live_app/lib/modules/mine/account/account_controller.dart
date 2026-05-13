@@ -86,44 +86,199 @@ class AccountController extends GetxController {
 
   void kuaishouTap() async {
     if (KuaishouAccountService.instance.logined.value) {
-      var result = await Utils.showAlertDialog("确定要退出快手账号吗？", title: "退出登录");
-      if (result) {
-        KuaishouAccountService.instance.logout();
-      }
+      showKuaishouAccountInfoDialog();
     } else {
       kuaishouLogin();
     }
   }
 
-  void kuaishouLogin() {
-    Utils.showBottomSheet(
-      title: "登录快手",
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.qr_code),
-            title: const Text("扫码登录"),
-            subtitle: const Text("使用快手 / 快手极速版 APP 扫描二维码登录"),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Get.back();
-              Get.toNamed(RoutePath.kKuaishouQRLogin);
-            },
+  /// 已登录情况下点击「快手」入口，弹出账号详情管理：
+  /// 显示当前用户、关键 Cookie 字段摘要、完整 Cookie（可选中复制），
+  /// 并提供 复制 / 重新登录 / 退出登录 操作。
+  void showKuaishouAccountInfoDialog() {
+    final service = KuaishouAccountService.instance;
+    Get.dialog(
+      AlertDialog(
+        title: Row(
+          children: [
+            ClipOval(
+              child: service.avatar.value.isNotEmpty
+                  ? Image.network(
+                      service.avatar.value,
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Image.asset(
+                        'assets/images/kuaishou.png',
+                        width: 32,
+                        height: 32,
+                      ),
+                    )
+                  : Image.asset(
+                      'assets/images/kuaishou.png',
+                      width: 32,
+                      height: 32,
+                    ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Obx(() => Text(
+                    service.name.value,
+                    style: const TextStyle(fontSize: 16),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  )),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildKuaishouCookieSummary(service.cookie),
+              const SizedBox(height: 10),
+              const Text(
+                "完整 Cookie（长按可选中）：",
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              const SizedBox(height: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: Container(
+                  width: double.maxFinite,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Get.isDarkMode
+                        ? Colors.white.withOpacity(0.06)
+                        : Colors.black.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Scrollbar(
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        service.cookie.isEmpty ? "(空)" : service.cookie,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontFamily: "monospace",
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "共 ${service.cookie.length} 字符",
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ],
           ),
-          ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text("Cookie登录"),
-            subtitle: const Text("从浏览器复制 Cookie 直接登录（推荐）"),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
               Get.back();
-              showKuaishouCookieTutorial();
+              var ok = await Utils.showAlertDialog(
+                "确定要退出快手账号吗？",
+                title: "退出登录",
+              );
+              if (ok) {
+                KuaishouAccountService.instance.logout();
+              }
             },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("退出登录"),
+          ),
+          TextButton(
+            onPressed: () {
+              Get.back();
+              kuaishouLogin();
+            },
+            child: const Text("重新登录"),
+          ),
+          TextButton(
+            onPressed: () {
+              if (service.cookie.isEmpty) {
+                SmartDialog.showToast("Cookie 为空");
+                return;
+              }
+              Clipboard.setData(ClipboardData(text: service.cookie));
+              SmartDialog.showToast("已复制完整 Cookie");
+            },
+            child: const Text("复制Cookie"),
+          ),
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text("关闭"),
           ),
         ],
       ),
     );
+  }
+
+  /// 拆解快手 Cookie 字符串，展示关键登录字段的存在情况，
+  /// 让用户一眼看出当前 Cookie 是否携带了完整登录态。
+  Widget _buildKuaishouCookieSummary(String cookie) {
+    // 关键字段 -> 显示名
+    const keys = <String, String>{
+      "kuaishou.live.web_st": "web_st",
+      "kuaishou.live.web.at": "web.at",
+      "kuaishou.live.web_ph": "web_ph",
+      "passToken": "passToken",
+      "userId": "userId",
+      "did": "did",
+      "kpn": "kpn",
+    };
+    final pairs = <String, String>{};
+    for (final seg in cookie.split(";")) {
+      final p = seg.trim();
+      if (p.isEmpty) continue;
+      final eq = p.indexOf("=");
+      if (eq <= 0) continue;
+      pairs[p.substring(0, eq).trim()] = p.substring(eq + 1).trim();
+    }
+    final chips = <Widget>[];
+    keys.forEach((key, label) {
+      final has = pairs[key]?.isNotEmpty == true;
+      chips.add(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: has
+              ? Colors.green.withOpacity(0.12)
+              : Colors.grey.withOpacity(0.18),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          "${has ? "✓" : "·"} $label",
+          style: TextStyle(
+            fontSize: 11,
+            color: has ? Colors.green.shade700 : Colors.grey,
+          ),
+        ),
+      ));
+    });
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "关键字段：",
+          style: TextStyle(fontSize: 13, color: Colors.grey),
+        ),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, runSpacing: 6, children: chips),
+      ],
+    );
+  }
+
+  /// 快手登录入口
+  ///
+  /// 仅保留 Cookie 登录方式（已移除二维码登录），点击后直接弹出 Cookie 登录教程，
+  /// 用户阅读步骤后可直接粘贴 Cookie 完成登录。
+  void kuaishouLogin() {
+    showKuaishouCookieTutorial();
   }
 
   /// 快手 Cookie 登录·教程与输入
@@ -143,10 +298,12 @@ class AccountController extends GetxController {
               SizedBox(height: 8),
               Text(
                 "1. 在电脑浏览器登录 live.kuaishou.com\n"
-                "2. 按 F12 打开开发者工具，切换到「应用程序」/「Application」\n"
-                "3. 左侧找到「Cookie」→「https://live.kuaishou.com」\n"
-                "4. 必须包含的字段：passToken、kuaishou.live.web_st、userId、kuaishou.live.web.at、did\n"
-                "5. 把整段 Cookie 复制下来粘贴即可（也可只粘贴关键字段，多个用 ; 分隔）",
+                "2. 按 F12 打开开发者工具，切换到「网络」或「应用程序」\n"
+                "3. 网络：刷新页面，点任意 live.kuaishou.com 请求，在请求头里复制完整 Cookie\n"
+                "   或 应用程序：左侧「Cookie」→「https://live.kuaishou.com」全选字段导出\n"
+                "4. 至少需包含：kuaishou.live.web_st、userId；建议同时包含 did、clientid、\n"
+                "   kwfv1、kwssectoken、kwscode、kuaishou.live.bfb1s、kuaishou.live.web_ph 等\n"
+                "5. 可直接粘贴一整段（重复 did/userId 会自动合并）",
                 style: TextStyle(fontSize: 13),
               ),
               SizedBox(height: 12),
@@ -193,14 +350,15 @@ class AccountController extends GetxController {
     cookie = cookie.trim();
     SmartDialog.showLoading(msg: "校验 Cookie...");
     try {
-      final info = await KuaishouQRLogin.verifyByCookies(cookie);
+      final result = await KuaishouQRLogin.verifyByCookiesFull(cookie);
       SmartDialog.dismiss();
-      if (info == null || info.userId.isEmpty) {
+      if (result == null || result.info.userId.isEmpty) {
         SmartDialog.showToast("Cookie 无效或已失效，请重新获取");
         return;
       }
+      final info = result.info;
       KuaishouAccountService.instance.setLogin(
-        cookie: cookie,
+        cookie: result.effectiveCookie,
         userName: info.name.isEmpty ? "已登录" : info.name,
         userAvatar: info.avatar,
       );

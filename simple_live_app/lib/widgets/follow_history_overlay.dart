@@ -13,6 +13,7 @@ import 'package:simple_live_app/models/db/history.dart';
 import 'package:simple_live_app/modules/live_room/live_room_controller.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
+import 'package:simple_live_app/widgets/desktop_horizontal_scroll.dart';
 import 'package:simple_live_app/widgets/follow_user_item.dart';
 import 'package:simple_live_app/widgets/net_image.dart';
 
@@ -47,6 +48,13 @@ class _FollowHistoryOverlayState extends State<FollowHistoryOverlay>
 
   /// 历史列表的滚动控制器
   final ScrollController _historyScrollController = ScrollController();
+
+  /// 顶部平台筛选条是否展开（关注Tab / 记录Tab 共用同一开关，
+  /// 切换Tab时保持当前展开/收起状态，符合直觉）
+  bool _showPlatformFilter = false;
+
+  /// 当前选中的平台筛选（null = 全部）
+  String? _filterSiteId;
 
   @override
   void initState() {
@@ -93,12 +101,13 @@ class _FollowHistoryOverlayState extends State<FollowHistoryOverlay>
         _liveStatusMap[item.id] = 0;
       }
     }
+    // 优先从关注列表同步头像，避免历史记录中头像过期
+    _syncFaceFromFollowList();
     if (mounted) setState(() {});
 
     // 逐个查询，避免并发过多导致发烫
     for (var item in _historyList) {
       if (!mounted) break;
-      // 已经有结果的跳过（刷新时重新查）
       var site = Sites.allSites[item.siteId];
       if (site == null) {
         _liveStatusMap[item.id] = 1;
@@ -108,13 +117,58 @@ class _FollowHistoryOverlayState extends State<FollowHistoryOverlay>
         var isLiving =
             await site.liveSite.getLiveStatus(roomId: item.roomId);
         _liveStatusMap[item.id] = isLiving ? 2 : 1;
+        // 正在直播时拉一次详情更新头像与昵称
+        if (isLiving) {
+          try {
+            var detail = await site.liveSite.getRoomDetail(roomId: item.roomId);
+            bool changed = false;
+            if (detail.userAvatar.isNotEmpty && detail.userAvatar != item.face) {
+              item.face = detail.userAvatar;
+              changed = true;
+            }
+            if (detail.userName.isNotEmpty && detail.userName != item.userName) {
+              item.userName = detail.userName;
+              changed = true;
+            }
+            if (changed) {
+              await DBService.instance.addOrUpdateHistory(item);
+            }
+          } catch (e) {
+            // 详情获取失败不影响主流程
+          }
+        }
       } catch (e) {
         Log.d("检查观看记录直播状态失败 [${item.userName}]: $e");
-        _liveStatusMap[item.id] = 1; // 出错视为未开播
+        _liveStatusMap[item.id] = 1;
       }
       if (mounted) setState(() {});
     }
     _isCheckingStatus = false;
+  }
+
+  /// 从已加载的关注列表中同步头像，避免观看记录头像过期
+  void _syncFaceFromFollowList() {
+    final followMap = {
+      for (var f in FollowService.instance.followList) f.id: f,
+    };
+    bool changed = false;
+    for (var item in _historyList) {
+      final follow = followMap[item.id];
+      if (follow == null) continue;
+      if (follow.face.isNotEmpty && follow.face != item.face) {
+        item.face = follow.face;
+        DBService.instance.addOrUpdateHistory(item);
+        changed = true;
+      }
+      if (follow.userName.isNotEmpty && follow.userName != item.userName) {
+        item.userName = follow.userName;
+        DBService.instance.addOrUpdateHistory(item);
+        changed = true;
+      }
+    }
+    if (changed && mounted) {
+      // _historyList 项已就地修改，无需重排
+    }
   }
 
   Future<void> _refreshHistoryStatus() async {
@@ -232,6 +286,23 @@ class _FollowHistoryOverlayState extends State<FollowHistoryOverlay>
                   ],
                 ),
               ),
+              // 平台筛选切换按钮（点击隐藏/显示底部平台筛选条）
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    _showPlatformFilter = !_showPlatformFilter;
+                    if (!_showPlatformFilter) {
+                      _filterSiteId = null;
+                    }
+                  });
+                },
+                tooltip: _showPlatformFilter ? "隐藏平台筛选" : "平台筛选",
+                icon: Icon(
+                  _showPlatformFilter ? Remix.filter_fill : Remix.filter_line,
+                  size: 19,
+                  color: _showPlatformFilter ? theme.colorScheme.primary : null,
+                ),
+              ),
               // Right side action button area
               if (_tabController.index == 1 && _historyList.isNotEmpty)
                 IconButton(
@@ -263,89 +334,260 @@ class _FollowHistoryOverlayState extends State<FollowHistoryOverlay>
     );
   }
 
-  Widget _buildFollowList() {
-    return Obx(
-      () => Stack(
-        children: [
-          RefreshIndicator(
-            onRefresh: FollowService.instance.loadData,
-            child: FollowService.instance.liveList.isEmpty
-                ? _buildEmptyState("暂无正在直播的关注", Remix.heart_3_line)
-                : ListView.builder(
-                    controller: _followScrollController,
-                    padding: const EdgeInsets.only(top: 4, bottom: 8),
-                    itemCount: FollowService.instance.liveList.length,
-                    itemBuilder: (_, i) {
-                      var item = FollowService.instance.liveList[i];
-                      return Obx(
-                        () => FollowUserItem(
-                          item: item,
-                          playing:
-                              widget.controller.rxSite.value.id == item.siteId &&
-                                  widget.controller.rxRoomId.value ==
-                                      item.roomId,
-                          onTap: () {
-                            widget.onDismiss();
-                            widget.controller.resetRoom(
-                              Sites.allSites[item.siteId]!,
-                              item.roomId,
-                            );
-                          },
-                          onLongPress:
-                              (Platform.isAndroid || Platform.isIOS)
-                                  ? () => _showFollowOptions(item)
-                                  : null,
-                          onSecondaryTap: (Platform.isWindows ||
-                                  Platform.isMacOS ||
-                                  Platform.isLinux)
-                              ? () => _showFollowOptions(item)
-                              : null,
-                        ),
-                      );
-                    },
-                  ),
+  /// 当前关注列表（已按平台过滤）
+  List<dynamic> get _filteredLiveFollows {
+    final base = FollowService.instance.liveList;
+    // 显式访问 length 触发 GetX 响应式收集
+    final _ = base.length;
+    if (_filterSiteId == null) return base.toList();
+    return base.where((u) => u.siteId == _filterSiteId).toList();
+  }
+
+  /// 当前观看记录（已按平台过滤）
+  List<History> get _filteredHistory {
+    if (_filterSiteId == null) return _historyList;
+    return _historyList.where((h) => h.siteId == _filterSiteId).toList();
+  }
+
+  /// 当前关注列表中实际存在的平台ID（按 Sites.allSites 顺序）
+  List<String> _activePlatformIdsForFollow() {
+    final follow = FollowService.instance.followList;
+    final _ = follow.length;
+    final ids = follow.map((u) => u.siteId).toSet();
+    return Sites.allSites.keys.where((k) => ids.contains(k)).toList();
+  }
+
+  /// 观看记录中实际存在的平台ID
+  List<String> _activePlatformIdsForHistory() {
+    final ids = _historyList.map((h) => h.siteId).toSet();
+    return Sites.allSites.keys.where((k) => ids.contains(k)).toList();
+  }
+
+  Widget _buildPlatformFilterBar(List<String> platformIds) {
+    if (platformIds.length <= 1 || !_showPlatformFilter) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.grey.withAlpha(20),
+            width: 0.5,
           ),
-          if (Platform.isLinux || Platform.isWindows || Platform.isMacOS)
-            Positioned(
-              right: 12,
-              bottom: 12,
-              // 用 Listener 把鼠标滚轮事件转发给列表，避免按钮区域阻塞滚动
-              child: Listener(
-                onPointerSignal: (event) =>
-                    _forwardScroll(_followScrollController, event),
-                child: Obx(
-                  () => _buildRefreshButton(
-                    refreshing: FollowService.instance.updating.value,
-                    onPressed: FollowService.instance.loadData,
-                  ),
+        ),
+      ),
+      // 使用 DesktopHorizontalScroll，桌面端可用鼠标拖拽 + 滚轮滑动
+      child: DesktopHorizontalScroll(
+        child: Row(
+          children: [
+            _buildPlatformChip(null, "全部"),
+            ...platformIds.map((id) {
+              final site = Sites.allSites[id]!;
+              return _buildPlatformChip(id, site.name, logo: site.logo);
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlatformChip(String? siteId, String label, {String? logo}) {
+    final theme = Theme.of(context);
+    final selected = _filterSiteId == siteId;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _filterSiteId = siteId;
+        });
+      },
+      child: Container(
+        margin: const EdgeInsets.only(right: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: selected
+              ? theme.colorScheme.primary.withAlpha(30)
+              : theme.cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? theme.colorScheme.primary
+                : Colors.grey.withAlpha(60),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (logo != null) ...[
+              ClipOval(
+                child: Image.asset(
+                  logo,
+                  width: 14,
+                  height: 14,
+                  fit: BoxFit.cover,
                 ),
               ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: selected ? theme.colorScheme.primary : null,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              ),
             ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildFollowList() {
+    return Obx(
+      () {
+        final platformIds = _activePlatformIdsForFollow();
+        final list = _filteredLiveFollows;
+        return Column(
+          children: [
+            _buildPlatformFilterBar(platformIds),
+            Expanded(
+              child: Stack(
+                children: [
+                  RefreshIndicator(
+                    onRefresh: FollowService.instance.loadData,
+                    child: list.isEmpty
+                        ? ListView(
+                            controller: _followScrollController,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(
+                                height: 240,
+                                child: _buildEmptyState(
+                                  _filterSiteId == null
+                                      ? "暂无正在直播的关注"
+                                      : "该平台暂无正在直播的关注",
+                                  Remix.heart_3_line,
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListView.builder(
+                            controller: _followScrollController,
+                            padding: const EdgeInsets.only(top: 4, bottom: 8),
+                            itemCount: list.length,
+                            itemBuilder: (_, i) {
+                              var item = list[i];
+                              return Obx(
+                                () => FollowUserItem(
+                                  item: item,
+                                  playing: widget.controller.rxSite.value.id ==
+                                          item.siteId &&
+                                      widget.controller.rxRoomId.value ==
+                                          item.roomId,
+                                  onTap: () {
+                                    widget.onDismiss();
+                                    widget.controller.resetRoom(
+                                      Sites.allSites[item.siteId]!,
+                                      item.roomId,
+                                    );
+                                  },
+                                  onLongPress:
+                                      (Platform.isAndroid || Platform.isIOS)
+                                          ? () => _showFollowOptions(item)
+                                          : null,
+                                  onSecondaryTap: (Platform.isWindows ||
+                                          Platform.isMacOS ||
+                                          Platform.isLinux)
+                                      ? () => _showFollowOptions(item)
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  if (Platform.isLinux ||
+                      Platform.isWindows ||
+                      Platform.isMacOS)
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: Listener(
+                        onPointerSignal: (event) =>
+                            _forwardScroll(_followScrollController, event),
+                        child: Obx(
+                          () => _buildRefreshButton(
+                            refreshing: FollowService.instance.updating.value,
+                            onPressed: FollowService.instance.loadData,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
   Widget _buildHistoryList() {
     if (_historyList.isEmpty) {
-      return _buildEmptyState("暂无观看记录", Remix.history_line);
+      // 整个记录为空时直接显示空状态（同时也保留下拉刷新能力）
+      return RefreshIndicator(
+        onRefresh: _refreshHistoryStatus,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: 240,
+              child: _buildEmptyState("暂无观看记录", Remix.history_line),
+            ),
+          ],
+        ),
+      );
     }
-    return RefreshIndicator(
-      onRefresh: _refreshHistoryStatus,
-      child: ListView.builder(
-        padding: const EdgeInsets.only(top: 4, bottom: 8),
-        itemCount: _historyList.length,
-        itemBuilder: (_, i) {
-          var item = _historyList[i];
-          var site = Sites.allSites[item.siteId];
-          if (site == null) return const SizedBox.shrink();
-          bool isPlaying =
-              widget.controller.rxSite.value.id == item.siteId &&
-                  widget.controller.rxRoomId.value == item.roomId;
-          int liveStatus = _liveStatusMap[item.id] ?? -1;
-          return _buildHistoryItem(item, site, isPlaying, liveStatus);
-        },
-      ),
+    final platformIds = _activePlatformIdsForHistory();
+    final list = _filteredHistory;
+    return Column(
+      children: [
+        _buildPlatformFilterBar(platformIds),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refreshHistoryStatus,
+            child: list.isEmpty
+                ? ListView(
+                    controller: _historyScrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      SizedBox(
+                        height: 240,
+                        child: _buildEmptyState(
+                          "该平台暂无观看记录",
+                          Remix.history_line,
+                        ),
+                      ),
+                    ],
+                  )
+                : ListView.builder(
+                    controller: _historyScrollController,
+                    padding: const EdgeInsets.only(top: 4, bottom: 8),
+                    itemCount: list.length,
+                    itemBuilder: (_, i) {
+                      var item = list[i];
+                      var site = Sites.allSites[item.siteId];
+                      if (site == null) return const SizedBox.shrink();
+                      bool isPlaying =
+                          widget.controller.rxSite.value.id == item.siteId &&
+                              widget.controller.rxRoomId.value == item.roomId;
+                      int liveStatus = _liveStatusMap[item.id] ?? -1;
+                      return _buildHistoryItem(item, site, isPlaying, liveStatus);
+                    },
+                  ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -446,9 +688,13 @@ class _FollowHistoryOverlayState extends State<FollowHistoryOverlay>
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        Image.asset(
-                          site.logo,
-                          width: 16,
+                        ClipOval(
+                          child: Image.asset(
+                            site.logo,
+                            width: 16,
+                            height: 16,
+                            fit: BoxFit.cover,
+                          ),
                         ),
                         const SizedBox(width: 4),
                         Text(

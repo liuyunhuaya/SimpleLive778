@@ -267,8 +267,8 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     );
 
     await setPortraitOrientation();
-    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-      // 亮度重置,桌面平台可能会报错,暂时不处理桌面平台的亮度
+    // iOS 上始终使用系统亮度，不对应用层亮度做任何调整
+    if (Platform.isAndroid || Platform.isMacOS) {
       try {
         await ScreenBrightness.instance.resetApplicationScreenBrightness();
       } catch (e) {
@@ -557,7 +557,8 @@ mixin PlayerGestureControlMixin
     if (Platform.isAndroid || Platform.isIOS) {
       _currentVolume = await volumeController.getVolume();
     }
-    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+    // iOS 上不再读取应用层亮度（始终跟随系统）
+    if (Platform.isAndroid || Platform.isMacOS) {
       _currentBrightness = await ScreenBrightness.instance.application;
     }
   }
@@ -576,7 +577,11 @@ mixin PlayerGestureControlMixin
 
     Log.logPrint("$verStartPosition/${e.globalPosition.dy}");
 
+    // iOS：左半屏的亮度手势统一忽略，亮度跟随系统设置
     if (leftVerticalDrag) {
+      if (Platform.isIOS) {
+        return;
+      }
       setGestureBrightness(e.globalPosition.dy);
     } else {
       setGestureVolume(e.globalPosition.dy);

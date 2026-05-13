@@ -45,17 +45,35 @@ class KuaishouSite implements LiveSite {
   String userCookie = "";
 
   Map<String, String> get headers {
-    final cookies = <String>[];
-    if (_cachedCookie.isNotEmpty) cookies.add(_cachedCookie);
-    if (userCookie.isNotEmpty) cookies.add(userCookie);
+    final merged = _mergeCookieStrings(_cachedCookie, userCookie);
     return {
       "User-Agent": kDesktopUserAgent,
       "Referer": "https://live.kuaishou.com/",
       "Accept":
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3",
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-      if (cookies.isNotEmpty) "Cookie": cookies.join("; "),
+      if (merged.isNotEmpty) "Cookie": merged,
     };
+  }
+
+  /// 把两段 Cookie 字符串按 key 去重合并；
+  /// 后者（userCookie）相同 key 覆盖前者（_cachedCookie），
+  /// 避免登录态 did/userId 被匿名 cookie 顶掉，造成 SSR 数据被当作未登录返回。
+  static String _mergeCookieStrings(String a, String b) {
+    final pairs = <String, String>{};
+    void parse(String s) {
+      for (final seg in s.split(";")) {
+        final p = seg.trim();
+        if (p.isEmpty) continue;
+        final eq = p.indexOf("=");
+        if (eq <= 0) continue;
+        pairs[p.substring(0, eq).trim()] = p.substring(eq + 1).trim();
+      }
+    }
+
+    parse(a);
+    parse(b);
+    return pairs.entries.map((e) => "${e.key}=${e.value}").join("; ");
   }
 
   /// 拉取首页 cookie（live.kuaishou.com 首次访问会下发 did/clientid 等鉴权cookie）
@@ -277,26 +295,36 @@ class KuaishouSite implements LiveSite {
   Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
     Map? state;
     Map firstNode = const {};
-    // 最多尝试 3 次：第一次失败/拿到 errorType=22 时强制重置 cookie 重试
-    for (int attempt = 0; attempt < 3; attempt++) {
+    // _fetchRoomState 内部已经做了"完整 cookie → 匿名 cookie → cdn 备用接口"3 策略尝试，
+    // 这里只做"反爬错误页/空 SSR"识别后的整体重试，最多 2 轮。
+    for (int attempt = 0; attempt < 2; attempt++) {
       await _ensureCookie(force: attempt > 0);
       state = await _fetchRoomState(roomId);
       if (state == null) {
-        if (attempt == 2) {
+        if (attempt == 1) {
           throw Exception("快手直播间数据解析失败，请稍后重试");
         }
         await Future.delayed(const Duration(milliseconds: 500));
         continue;
       }
       firstNode = _resolvePlayListFirst(state);
-      // 检测 errorType.type==22（典型反爬错误页），刷新 cookie 重试
+      // 检测 errorType.type==22（典型反爬错误页），刷新 cookie 整体重试
       final err = firstNode["errorType"];
       final errType = (err is Map) ? err["type"] : null;
       if (errType == 22 || errType == "22") {
-        if (attempt < 2) {
+        if (attempt < 1) {
           await Future.delayed(const Duration(milliseconds: 500));
           continue;
         }
+      }
+      // SSR 中拿到了 playList 节点，但 liveStream 为空且 author 也为空，
+      // 多半是被反爬投放了"空 SSR"。整体刷新 cookie 再试一次。
+      final ls = firstNode["liveStream"] ?? firstNode["livestream"];
+      final au = firstNode["author"] ?? firstNode["principal"];
+      final emptySsr = (ls is! Map || ls.isEmpty) && (au is! Map || au.isEmpty);
+      if (emptySsr && attempt < 1) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        continue;
       }
       break;
     }
@@ -304,15 +332,61 @@ class KuaishouSite implements LiveSite {
 
     final liveStream =
         (firstNode["liveStream"] ?? firstNode["livestream"] ?? const {}) as Map;
-    final author =
+    Map author =
         (firstNode["author"] ?? firstNode["principal"] ?? const {}) as Map;
     final gameInfo = (firstNode["gameInfo"] ?? const {}) as Map;
     final config = (firstNode["config"] ?? const {}) as Map;
-    final isLive = firstNode["isLiving"] == true ||
+
+    // 开播判定：尽量宽松，覆盖快手 SSR 不同版本的字段
+    bool isLive = firstNode["isLiving"] == true ||
+        firstNode["living"] == true ||
         liveStream["isLive"] == true ||
+        liveStream["living"] == true ||
         liveStream["status"]?.toString() == "1" ||
-        liveStream["status"]?.toString() == "LIVING" ||
-        (liveStream["id"]?.toString() ?? "").isNotEmpty;
+        liveStream["status"]?.toString() == "2" ||
+        liveStream["status"]?.toString().toUpperCase() == "LIVING" ||
+        config["living"] == true ||
+        config["status"]?.toString() == "1" ||
+        (liveStream["id"]?.toString() ?? "").isNotEmpty ||
+        (config["liveStreamId"]?.toString() ?? "").isNotEmpty ||
+        (liveStream["playUrls"] is List &&
+            (liveStream["playUrls"] as List).isNotEmpty) ||
+        (liveStream["playUrls"] is Map &&
+            (liveStream["playUrls"] as Map).isNotEmpty) ||
+        (config["multiResolutionPlayUrls"] is List &&
+            (config["multiResolutionPlayUrls"] as List).isNotEmpty) ||
+        (liveStream["multiResolutionPlayUrls"] is List &&
+            (liveStream["multiResolutionPlayUrls"] as List).isNotEmpty);
+
+    // 兜底：仅当 SSR 完全没拿到开播信号时，用 search/author 反查确认在播 +
+    // 补全主播 UI 信息（id / name / avatar / description）。
+    // 注意：playUrls 仍来自 SSR；本兜底只用于消除"明明在播却显示未开播"的体验回退。
+    if (!isLive) {
+      final apiAuthor = await _verifyLivingBySearch(roomId);
+      if (apiAuthor != null) {
+        isLive = true;
+        final filled = <String, dynamic>{...author};
+        void fillIfEmpty(String key, dynamic value) {
+          if (value == null) return;
+          final str = value.toString();
+          if (str.isEmpty) return;
+          final existing = filled[key]?.toString() ?? "";
+          if (existing.isEmpty) filled[key] = value;
+        }
+
+        fillIfEmpty("id", apiAuthor["id"]);
+        fillIfEmpty("name", apiAuthor["name"]);
+        fillIfEmpty("avatar", apiAuthor["avatar"]);
+        fillIfEmpty("description", apiAuthor["description"]);
+        fillIfEmpty("originUserId", apiAuthor["originUserId"]);
+        author = filled;
+        firstNode = {
+          ...firstNode,
+          "isLiving": true,
+          "author": filled,
+        };
+      }
+    }
 
     // 合并 liveStream + config 为 data，保证清晰度提取能访问 multiResolutionPlayUrls
     // 注意：config.watchingCount 才是页面 top-count 实时在线观众数，
@@ -393,61 +467,32 @@ class KuaishouSite implements LiveSite {
     );
   }
 
+  /// 获取直播间所有可用清晰度（按"等级 → 码率"降序排序，列表[0] 即为**最高清晰度**）。
+  ///
+  /// 解析顺序（任一命中即用，避免重复计入）：
+  /// 1. `multiResolutionPlayUrls`：同清晰度多 CDN URL（最完整、最权威）
+  /// 2. `playUrls.{h264|h265|hevc}.adaptationSet.representation`：分编码清晰度组
+  /// 3. `playUrls`（List 形式）：扫平后的 URL 列表（旧版 SSR）
+  /// 4. `lebPlayUrls` / `webRTCPlayUrls` / `lhlsPlayUrls`：边缘 / 低延迟流（兜底）
+  /// 5. `hlsPlayUrl`：单条 HLS 流（最弱兜底）
+  ///
+  /// 调用方 [LiveRoomController.getPlayQualites] 会按用户设置的画质等级（最高/中/最低）
+  /// 选择 currentQuality 索引，最高时取 0（即本方法返回列表的首个元素），
+  /// 因此**返回列表必须保证首项是清晰度最高、码率最高、CDN 最优**的那一组。
   @override
   Future<List<LivePlayQuality>> getPlayQualites(
       {required LiveRoomDetail detail}) async {
-    // 快手直播间清晰度资源有三种可用结构：
-    // 1. config.multiResolutionPlayUrls：同一清晰度多 CDN URL（响应2.txt首选）
-    // 2. liveStream.playUrls.h264 / h265 下的 adaptationSet.representation
-    // 3. config.playUrls：扫平的 url 列表（备选）
     final qualityMap = <String, _KuaishouQuality>{};
     try {
-      final data = detail.data as Map?;
-      if (data == null) return [];
+      final dataRaw = detail.data;
+      if (dataRaw is! Map) return [];
+      final data = Map<String, dynamic>.from(
+          dataRaw.map((k, v) => MapEntry(k.toString(), v)));
 
-      // ===== 策略 1：multiResolutionPlayUrls（最完整） =====
-      final multi = data["multiResolutionPlayUrls"];
-      if (multi is List) {
-        for (final group in multi) {
-          if (group is! Map) continue;
-          final name = (group["name"] ?? group["shortName"] ?? "默认")
-              .toString()
-              .trim();
-          final level =
-              int.tryParse(group["level"]?.toString() ?? "0") ?? 0;
-          final urlsRaw = group["urls"];
-          if (urlsRaw is! List) continue;
-          int bitrate = 0;
-          final urlList = <String>[];
-          for (final u in urlsRaw) {
-            if (u is Map) {
-              final ux = u["url"]?.toString() ?? "";
-              if (ux.isNotEmpty) urlList.add(ux);
-              final br = int.tryParse(u["bitrate"]?.toString() ?? "0") ?? 0;
-              if (br > bitrate) bitrate = br;
-            } else if (u is String && u.isNotEmpty) {
-              urlList.add(u);
-            }
-          }
-          if (urlList.isEmpty) continue;
-          final key = _normalizeQualityName(name);
-          final exist = qualityMap[key];
-          if (exist == null) {
-            qualityMap[key] = _KuaishouQuality(
-              name: key,
-              bitrate: bitrate,
-              level: level,
-              urls: urlList,
-            );
-          } else {
-            for (final u in urlList) {
-              if (!exist.urls.contains(u)) exist.urls.add(u);
-            }
-          }
-        }
-      }
+      // ===== 策略 1：multiResolutionPlayUrls（最完整，覆盖原画/蓝光/超清/高清/流畅） =====
+      _extractMultiResolutionPlayUrls(data["multiResolutionPlayUrls"], qualityMap);
 
-      // ===== 策略 2：playUrls.h264 / h265.adaptationSet.representation =====
+      // ===== 策略 2：playUrls.{h264|h265|hevc}.adaptationSet.representation =====
       if (qualityMap.isEmpty) {
         final adapts = <Map>[];
         void addList(dynamic raw) {
@@ -457,7 +502,7 @@ class KuaishouSite implements LiveSite {
           }
         }
 
-        // playUrls 可能是 Map（响应2.txt）或 List（旧版）
+        // playUrls 可能是 Map（新版 SSR）或 List（旧版 SSR）
         final pu = data["playUrls"];
         if (pu is Map) {
           if (pu["h264"] is Map) adapts.add(pu["h264"] as Map);
@@ -481,13 +526,19 @@ class KuaishouSite implements LiveSite {
           if (reps == null) continue;
           for (final rep in reps) {
             if (rep is! Map) continue;
-            final name = (rep["name"] ?? rep["qualityType"] ?? "默认")
+            final name = (rep["name"] ??
+                    rep["qualityType"] ??
+                    rep["qualityLabel"] ??
+                    "默认")
                 .toString()
                 .trim();
             final url = rep["url"]?.toString() ?? "";
             if (url.isEmpty) continue;
-            final bitrate =
-                int.tryParse(rep["bitrate"]?.toString() ?? "0") ?? 0;
+            // 优先取 maxBitrate，没有再退回 bitrate
+            final bitrate = int.tryParse(rep["maxBitrate"]?.toString() ??
+                    rep["bitrate"]?.toString() ??
+                    "0") ??
+                0;
             final level = int.tryParse(rep["level"]?.toString() ?? "0") ?? 0;
             final key = _normalizeQualityName(name);
             final exist = qualityMap[key];
@@ -505,7 +556,7 @@ class KuaishouSite implements LiveSite {
         }
       }
 
-      // ===== 策略3：扫平的 playUrls（后备，紧迫场景下只有1个默认质） =====
+      // ===== 策略 3：扫平的 playUrls（旧版 SSR） =====
       if (qualityMap.isEmpty) {
         final flat = data["playUrls"];
         if (flat is List) {
@@ -529,20 +580,39 @@ class KuaishouSite implements LiveSite {
         }
       }
 
-      // 后备乔：hlsPlayUrl
+      // ===== 策略 4：lebPlayUrls / webRTCPlayUrls / lhlsPlayUrls 等边缘流兜底 =====
       if (qualityMap.isEmpty) {
-        final hls = data["hlsPlayUrl"]?.toString() ?? "";
-        if (hls.isNotEmpty) {
-          qualityMap["默认"] = _KuaishouQuality(
-            name: "默认",
-            bitrate: 0,
-            level: 0,
-            urls: [hls],
-          );
+        for (final key in const [
+          "lebPlayUrls",
+          "webRTCPlayUrls",
+          "lhlsPlayUrls",
+        ]) {
+          _extractMultiResolutionPlayUrls(data[key], qualityMap);
+          if (qualityMap.isNotEmpty) break;
         }
       }
 
-      // 优先按 level 降序（level 是快手官方清晰度等级），同级再按码率
+      // ===== 策略 5：hlsPlayUrl（单条 HLS 流，最后兜底） =====
+      if (qualityMap.isEmpty) {
+        for (final key in const [
+          "hlsPlayUrl",
+          "playUrl",
+          "playUrlH265",
+        ]) {
+          final s = data[key]?.toString() ?? "";
+          if (s.isNotEmpty) {
+            qualityMap["默认"] = _KuaishouQuality(
+              name: "默认",
+              bitrate: 0,
+              level: 0,
+              urls: [s],
+            );
+            break;
+          }
+        }
+      }
+
+      // 按"等级 → 码率"降序排序，list[0] 即为最高清晰度
       final list = qualityMap.values.toList()
         ..sort((a, b) {
           final c = b.level.compareTo(a.level);
@@ -559,6 +629,54 @@ class KuaishouSite implements LiveSite {
       CoreLog.error(e);
     }
     return [];
+  }
+
+  /// 解析快手 multiResolutionPlayUrls / lebPlayUrls / webRTCPlayUrls 等"同清晰度多 CDN"结构。
+  /// 这些字段统一是 `[{name, level, urls: [{url, bitrate}, ...]}, ...]`。
+  void _extractMultiResolutionPlayUrls(
+      dynamic multi, Map<String, _KuaishouQuality> qualityMap) {
+    if (multi is! List) return;
+    for (final group in multi) {
+      if (group is! Map) continue;
+      final name =
+          (group["name"] ?? group["shortName"] ?? group["qualityType"] ?? "默认")
+              .toString()
+              .trim();
+      final level = int.tryParse(group["level"]?.toString() ?? "0") ?? 0;
+      final urlsRaw = group["urls"];
+      if (urlsRaw is! List) continue;
+      int bitrate = 0;
+      final urlList = <String>[];
+      for (final u in urlsRaw) {
+        if (u is Map) {
+          final ux = u["url"]?.toString() ?? "";
+          if (ux.isNotEmpty) urlList.add(ux);
+          // 优先 maxBitrate，没有再回退 bitrate
+          final br = int.tryParse(u["maxBitrate"]?.toString() ??
+                  u["bitrate"]?.toString() ??
+                  "0") ??
+              0;
+          if (br > bitrate) bitrate = br;
+        } else if (u is String && u.isNotEmpty) {
+          urlList.add(u);
+        }
+      }
+      if (urlList.isEmpty) continue;
+      final key = _normalizeQualityName(name);
+      final exist = qualityMap[key];
+      if (exist == null) {
+        qualityMap[key] = _KuaishouQuality(
+          name: key,
+          bitrate: bitrate,
+          level: level,
+          urls: urlList,
+        );
+      } else {
+        for (final u in urlList) {
+          if (!exist.urls.contains(u)) exist.urls.add(u);
+        }
+      }
+    }
   }
 
   @override
@@ -612,16 +730,22 @@ class KuaishouSite implements LiveSite {
     return Future.value([]);
   }
 
+  /// 房间搜索：调用主播搜索接口，把所有主播作为"房间"返回
+  ///
+  /// 设计变更（2026.05）：
+  /// - 原实现只保留 living=true 的主播，搜"边路之怪"只返回 tingan666 一条
+  ///   （唯一在播的，名字不绝对匹配），用户体验差。
+  /// - 现在返回所有匹配主播：living=true 排前面 + keyword 精确匹配优先排序，
+  ///   未开播的主播保留在结果中但 title 加 [未开播] 前缀提示，让用户能直接选择。
+  /// - 进入未开播主播详情时，KuaishouSite.getRoomDetail 会显示"未开播"状态。
   @override
   Future<LiveSearchRoomResult> searchRooms(String keyword,
       {int page = 1}) async {
-    // 快手不再有专门的房间搜索，直接走主播搜索后再判断在播状态
     final anchorResult = await searchAnchors(keyword, page: page);
     final items = anchorResult.items
-        .where((e) => e.liveStatus)
         .map((e) => LiveRoomItem(
               roomId: e.roomId,
-              title: e.userName,
+              title: e.liveStatus ? e.userName : "[未开播] ${e.userName}",
               cover: e.avatar,
               userName: e.userName,
               online: 0,
@@ -630,30 +754,61 @@ class KuaishouSite implements LiveSite {
     return LiveSearchRoomResult(hasMore: anchorResult.hasMore, items: items);
   }
 
+  /// 主播搜索：调用 live_api/search/author 接口
+  ///
+  /// 关键参数说明（与浏览器抓包一致）：
+  /// - caver=2：协议版本号，缺失会被服务端识别为过期客户端并返回少量结果
+  /// - count=15：单页条数（与浏览器默认一致）
+  /// - key/keyword：搜索关键字（两者必须一致）
+  /// - lssid/ussid：上次会话 id / 用户会话 id；首页可留空，分页时需带上一次响应中的 ussid
+  ///
+  /// 排序优先级：
+  /// 1. living=true 优先于 living=false
+  /// 2. 名称完全匹配优先于部分匹配
+  /// 3. 名称包含 keyword 优先于不包含
+  /// 4. 其余保持服务端返回顺序
   @override
   Future<LiveSearchAnchorResult> searchAnchors(String keyword,
       {int page = 1}) async {
+    final trimmed = keyword.trim();
+    if (trimmed.isEmpty) {
+      return LiveSearchAnchorResult(hasMore: false, items: <LiveAnchorItem>[]);
+    }
     try {
       await _ensureCookie();
+      final ussid = _lastSearchUssid;
       final result = await HttpClient.instance.getJson(
         "https://live.kuaishou.com/live_api/search/author",
         queryParameters: {
+          "caver": 2,
           "count": 15,
-          "key": keyword,
-          "keyword": keyword,
+          "key": trimmed,
+          "keyword": trimmed,
           "lssid": "",
           "page": page,
-          "ussid": "",
+          "ussid": ussid,
         },
         header: headers,
       );
       final data = (result is Map) ? result["data"] : null;
+      // 服务端在下一次请求时需要带上本次响应里的 ussid，保证分页连续。
+      if (data is Map) {
+        final newUssid = data["ussid"]?.toString() ?? "";
+        if (newUssid.isNotEmpty) {
+          _lastSearchUssid = newUssid;
+        }
+      }
       final raw = (data is Map) ? data["list"] : null;
       final list = (raw is List) ? raw : const [];
       final items = <LiveAnchorItem>[];
       for (final item in list) {
         if (item is! Map) continue;
-        final id = item["id"]?.toString() ?? "";
+        // id 字段是字符串型主播 eid（如 tingan666），是 https://live.kuaishou.com/u/{id} 的 id
+        var id = item["id"]?.toString() ?? "";
+        if (id.isEmpty) {
+          // 兜底：服务端偶尔会丢 id 字段，退而用 originUserId（纯数字 ID）
+          id = item["originUserId"]?.toString() ?? "";
+        }
         if (id.isEmpty) continue;
         items.add(LiveAnchorItem(
           roomId: id,
@@ -662,6 +817,27 @@ class KuaishouSite implements LiveSite {
           liveStatus: item["living"] == true,
         ));
       }
+
+      // 按"在播优先 + keyword 精确匹配优先"重新排序，
+      // 解决用户痛点：搜"边路之怪"原本只能看到 tingan666，
+      // 现在能完整看到所有同名主播并优先看到在播的。
+      final lowerKw = trimmed.toLowerCase();
+      int rank(LiveAnchorItem a) {
+        final lowerName = a.userName.toLowerCase().trim();
+        final exact = lowerName == lowerKw;
+        final startsWith = lowerName.startsWith(lowerKw);
+        final contains = lowerName.contains(lowerKw);
+        // 4-bit 分数：bit3=living, bit2=exact, bit1=startsWith, bit0=contains
+        int score = 0;
+        if (a.liveStatus) score |= 1 << 3;
+        if (exact) score |= 1 << 2;
+        if (startsWith) score |= 1 << 1;
+        if (contains) score |= 1 << 0;
+        return score;
+      }
+
+      items.sort((a, b) => rank(b).compareTo(rank(a)));
+
       // 快手 search/author 单页固定 15 条，少于 15 视为最后一页
       final hasMore = list.length >= 15;
       return LiveSearchAnchorResult(hasMore: hasMore, items: items);
@@ -670,6 +846,10 @@ class KuaishouSite implements LiveSite {
       return LiveSearchAnchorResult(hasMore: false, items: <LiveAnchorItem>[]);
     }
   }
+
+  /// 主播搜索接口的上一次会话 id，用于分页连续性。
+  /// 不同 keyword 之间共享并无副作用，服务端只用它做去重 / 排序参考。
+  String _lastSearchUssid = "";
 
   @override
   bool get supportLiveRank => false;
@@ -754,35 +934,161 @@ class KuaishouSite implements LiveSite {
   }
 
   /// 拉取直播间 HTML 并提取 __INITIAL_STATE__；
-  /// 主页失败时回退到 cdn 接口。
+  ///
+  /// **登录后的健壮性策略**（核心修复）：
+  /// 经测试发现登录态 cookie 会让 SSR 偶发性返回精简数据（liveStream 缺 playUrls，
+  /// 导致清晰度列表为空，无法播放）。因此本方法按"完整 cookie → 匿名 cookie → cdn 备用接口"
+  /// 顺序尝试，每个 SSR 都会用 [_isStateUseful] 校验是否包含 playUrls，
+  /// 不完整就继续向下兜底。直到任一策略拿到含 playUrls 的 SSR 为止。
+  ///
+  /// 这是"未登录可看 / 登录后看不了"问题的关键修复点。
   Future<Map?> _fetchRoomState(String roomId) async {
-    Map? state;
+    // 策略 1：完整 cookies（匿名 + 登录），相当于浏览器登录状态
+    final s1 = await _tryFetchRoomState(roomId, withUserCookie: true);
+    if (_isStateUseful(s1)) return s1;
+
+    // 策略 2：仅匿名 cookies（去掉 userCookie），登录态干扰下 SSR 反而不下发 playUrls
+    // 时，回到匿名状态通常能拿到完整数据
+    if (userCookie.isNotEmpty) {
+      final s2 = await _tryFetchRoomState(roomId, withUserCookie: false);
+      if (_isStateUseful(s2)) return s2;
+      // 若匿名也不可用，但比策略 1 多了一些字段（如开播信号），优先返回它
+      if (s2 != null && s1 == null) return s2;
+    }
+
+    // 策略 3：cdn/live/byUser 备用接口（HTML 路径不同，SSR 数据结构一致）
+    final s3 = await _tryFetchRoomStateFromCdn(roomId);
+    if (_isStateUseful(s3)) return s3;
+
+    // 兜底：返回任一非空的 state，让上层能继续走兜底逻辑（如反查搜索接口）
+    return s1 ?? s3;
+  }
+
+  /// 校验 SSR 数据是否"可用于播放"——核心标识：能在 playList 第一项里找到 playUrls 或 liveStream.id
+  bool _isStateUseful(Map? state) {
+    if (state == null) return false;
     try {
+      final first = _resolvePlayListFirst(state);
+      if (first.isEmpty) return false;
+      final liveStream =
+          (first["liveStream"] ?? first["livestream"] ?? const {}) as Map;
+      final config = (first["config"] ?? const {}) as Map;
+      // 1. 有 multiResolutionPlayUrls → 完整可播
+      final mp1 = liveStream["multiResolutionPlayUrls"];
+      final mp2 = config["multiResolutionPlayUrls"];
+      if (mp1 is List && mp1.isNotEmpty) return true;
+      if (mp2 is List && mp2.isNotEmpty) return true;
+      // 2. 有 playUrls.h264/h265 结构 → 完整可播
+      final pu = liveStream["playUrls"];
+      if (pu is Map &&
+          (pu["h264"] is Map ||
+              pu["h265"] is Map ||
+              pu["hevc"] is Map)) {
+        return true;
+      }
+      if (pu is List && pu.isNotEmpty) return true;
+      return false;
+    } catch (e) {
+      CoreLog.error(e);
+      return false;
+    }
+  }
+
+  /// 单次尝试抓取主页 SSR（按 [withUserCookie] 决定是否带登录 cookie）
+  Future<Map?> _tryFetchRoomState(
+    String roomId, {
+    required bool withUserCookie,
+  }) async {
+    try {
+      final reqHeaders = withUserCookie ? headers : _anonymousHeaders();
       final html = await HttpClient.instance.getText(
         "https://live.kuaishou.com/u/$roomId",
         queryParameters: {},
-        header: headers,
+        header: reqHeaders,
       );
-      state = _extractInitialState(html);
+      return _extractInitialState(html);
     } catch (e) {
       CoreLog.error(e);
+      return null;
     }
-    if (state == null) {
-      try {
-        final mHtml = await HttpClient.instance.getText(
-          "https://live.kuaishou.com/cdn/live/byUser/$roomId",
-          queryParameters: {},
-          header: headers,
-        );
-        state = _extractInitialState(mHtml);
-      } catch (e) {
-        CoreLog.error(e);
-      }
-    }
-    return state;
   }
 
-  /// 从 INIT_STATE 中提取 liveroom.playList[0]
+  /// 从备用 cdn 路径抓取 SSR
+  Future<Map?> _tryFetchRoomStateFromCdn(String roomId) async {
+    try {
+      final mHtml = await HttpClient.instance.getText(
+        "https://live.kuaishou.com/cdn/live/byUser/$roomId",
+        queryParameters: {},
+        header: headers,
+      );
+      return _extractInitialState(mHtml);
+    } catch (e) {
+      CoreLog.error(e);
+      return null;
+    }
+  }
+
+  /// 仅带匿名 cookie 的 headers（去除 userCookie，避免登录态干扰 SSR 下发）
+  Map<String, String> _anonymousHeaders() {
+    return {
+      "User-Agent": kDesktopUserAgent,
+      "Referer": "https://live.kuaishou.com/",
+      "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      if (_cachedCookie.isNotEmpty) "Cookie": _cachedCookie,
+    };
+  }
+
+  /// 兜底反查·通过 `live_api/search/author` 接口确认 [roomId] 是否正在开播。
+  ///
+  /// 这条路径**不返回 playUrls**，只用于：
+  /// - 在 SSR + 拉流接口都失败时，确认主播确实在播（避免误判为未开播）
+  /// - 顺便补全 author 信息（id / name / avatar / description / originUserId）
+  ///
+  /// 返回 null 表示主播未开播 / 搜索失败；否则返回搜索条目 Map。
+  Future<Map<String, dynamic>?> _verifyLivingBySearch(String roomId) async {
+    if (roomId.isEmpty) return null;
+    try {
+      // 与主搜索方法保持一致：必须带 caver=2，否则服务端返回的列表会被截断
+      final result = await HttpClient.instance.getJson(
+        "https://live.kuaishou.com/live_api/search/author",
+        queryParameters: {
+          "caver": 2,
+          "count": 15,
+          "key": roomId,
+          "keyword": roomId,
+          "lssid": "",
+          "page": 1,
+          "ussid": "",
+        },
+        header: headers,
+      );
+      final data = (result is Map) ? result["data"] : null;
+      final list = (data is Map) ? data["list"] : null;
+      if (list is! List || list.isEmpty) return null;
+      Map? matched;
+      for (final item in list) {
+        if (item is! Map) continue;
+        if ((item["id"]?.toString() ?? "") == roomId) {
+          matched = item;
+          break;
+        }
+      }
+      if (matched == null) return null;
+      if (matched["living"] != true) return null;
+      return matched.map((k, v) => MapEntry(k.toString(), v));
+    } catch (e) {
+      CoreLog.error(e);
+      return null;
+    }
+  }
+
+  /// 从 INIT_STATE 中提取 `liveroom.playList[0]`。
+  ///
+  /// 快手 SSR 中当前主播一定排在 playList[0]；之前曾尝试用 roomId 匹配，
+  /// 但 `author.id` 多为数字 originUserId，与 URL 路径里的字符串 eid 不等，
+  /// 反而落到 fallback 分支选错节点，因此直接取首项是最稳的选择。
   Map _resolvePlayListFirst(Map state) {
     final liveroom = (_findKey(state, "liveroom") ?? state) as Map? ?? const {};
     final playListRaw = liveroom["playList"] ?? _findKey(liveroom, "playList");

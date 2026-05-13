@@ -16,6 +16,7 @@ import 'package:simple_live_app/modules/live_room/player/player_controls.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
+import 'package:simple_live_app/widgets/desktop_horizontal_scroll.dart';
 import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
 import 'package:simple_live_app/widgets/follow_user_item.dart';
 import 'package:simple_live_app/widgets/keep_alive_wrapper.dart';
@@ -741,9 +742,25 @@ class LiveRoomPage extends GetView<LiveRoomController> {
           () => Visibility(
             visible: controller.autoExitEnable.value,
             child: ListTile(
-              leading: const Icon(Icons.timer_outlined),
+              leading: const Icon(Icons.timer_outlined, color: Colors.deepOrange),
               visualDensity: VisualDensity.compact,
-              title: Text("${parseDuration(controller.countdown.value)}后自动关闭"),
+              title: Text(
+                controller.autoExitMode.value == 1
+                    ? "${_targetTimeText(controller.autoExitTargetMinutes.value)}自动关闭"
+                    : "${parseDuration(controller.countdown.value)}后自动关闭",
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: controller.autoExitMode.value == 1
+                  ? Text(
+                      "剩余：${parseDuration(controller.countdown.value)}",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    )
+                  : null,
+              trailing: const Icon(Icons.chevron_right),
+              onTap: controller.showAutoExitSheet,
             ),
           ),
         ),
@@ -846,55 +863,314 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   }
 
   Widget buildFollowList() {
-    return Obx(
-      () => Stack(
-        children: [
-          RefreshIndicator(
-            onRefresh: FollowService.instance.loadData,
-            child: ListView.builder(
-              itemCount: FollowService.instance.liveList.length,
-              itemBuilder: (_, i) {
-                var item = FollowService.instance.liveList[i];
-                return Obx(
-                  () => FollowUserItem(
-                    item: item,
-                    playing: controller.rxSite.value.id == item.siteId &&
-                        controller.rxRoomId.value == item.roomId,
-                    onTap: () {
-                      controller.resetRoom(
-                        Sites.allSites[item.siteId]!,
-                        item.roomId,
-                      );
-                    },
-                    onLongPress: (Platform.isAndroid || Platform.isIOS) ? () {
-                      showFollowUserOptionsInRoom(item);
-                    } : null,
-                    onSecondaryTap: (Platform.isWindows || Platform.isMacOS || Platform.isLinux) ? () {
-                      showFollowUserOptionsInRoom(item);
-                    } : null,
+    return Column(
+      children: [
+        // 顶部：平台筛选切换按钮 + 平台筛选条
+        _buildFollowFilterHeader(),
+        Expanded(
+          child: Obx(
+            () {
+              // 在 Obx builder 内同步访问，确保 GetX 能收集到依赖
+              final list = controller.filteredLiveFollowList;
+              final isEmpty = list.isEmpty;
+              final filterSiteId = controller.followFilterSiteId.value;
+              return Stack(
+                children: [
+                  RefreshIndicator(
+                    onRefresh: FollowService.instance.loadData,
+                    child: isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              SizedBox(
+                                height: 240,
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Remix.tv_2_line,
+                                        size: 40,
+                                        color: Colors.grey.withAlpha(120),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        filterSiteId == null
+                                            ? "暂无关注的主播正在直播"
+                                            : "该平台暂无关注的主播正在直播",
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListView.builder(
+                            itemCount: list.length,
+                            itemBuilder: (_, i) {
+                              var item = list[i];
+                              return Obx(
+                                () => FollowUserItem(
+                                  item: item,
+                                  playing: controller.rxSite.value.id ==
+                                          item.siteId &&
+                                      controller.rxRoomId.value == item.roomId,
+                                  onTap: () {
+                                    controller.resetRoom(
+                                      Sites.allSites[item.siteId]!,
+                                      item.roomId,
+                                    );
+                                  },
+                                  onLongPress:
+                                      (Platform.isAndroid || Platform.isIOS)
+                                          ? () =>
+                                              showFollowUserOptionsInRoom(item)
+                                          : null,
+                                  onSecondaryTap: (Platform.isWindows ||
+                                          Platform.isMacOS ||
+                                          Platform.isLinux)
+                                      ? () => showFollowUserOptionsInRoom(item)
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
                   ),
-                );
-              },
+                  if (Platform.isLinux ||
+                      Platform.isWindows ||
+                      Platform.isMacOS)
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: Obx(
+                        () => DesktopRefreshButton(
+                          refreshing: FollowService.instance.updating.value,
+                          onPressed: FollowService.instance.loadData,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 关注Tab顶部：平台筛选切换按钮 + 平台筛选条
+  Widget _buildFollowFilterHeader() {
+    return Obx(() {
+      final platformIds = controller.followPlatformIdsForFilter;
+      // 只有1个或0个平台时不显示筛选（无意义）
+      final hasMultiPlatform = platformIds.length > 1;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: Colors.grey.withAlpha(20),
+              width: 0.5,
             ),
           ),
-          if (Platform.isLinux || Platform.isWindows || Platform.isMacOS)
-            Positioned(
-              right: 12,
-              bottom: 12,
-              child: Obx(
-                () => DesktopRefreshButton(
-                  refreshing: FollowService.instance.updating.value,
-                  onPressed: FollowService.instance.loadData,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                // 切换按钮
+                if (hasMultiPlatform)
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: controller.toggleFollowPlatformFilter,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: controller.showFollowPlatformFilter.value
+                              ? Theme.of(Get.context!)
+                                  .colorScheme
+                                  .primary
+                                  .withAlpha(30)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              controller.showFollowPlatformFilter.value
+                                  ? Remix.filter_fill
+                                  : Remix.filter_line,
+                              size: 14,
+                              color: controller.showFollowPlatformFilter.value
+                                  ? Theme.of(Get.context!).colorScheme.primary
+                                  : Colors.grey.shade600,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              controller.showFollowPlatformFilter.value
+                                  ? "隐藏分类"
+                                  : "平台筛选",
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: controller.showFollowPlatformFilter.value
+                                    ? Theme.of(Get.context!)
+                                        .colorScheme
+                                        .primary
+                                    : Colors.grey.shade600,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox.shrink(),
+                const Spacer(),
+                // 数量小提示
+                Text(
+                  "${controller.filteredLiveFollowList.length} 个开播",
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ],
+            ),
+            // 平台筛选条
+            // 使用 DesktopHorizontalScroll 包装，让 Windows / 桌面端能用鼠标
+            // 拖拽 + 滚轮 滑动按钮行（修复 Windows 端按钮显示不完整且无法滑动的问题）
+            if (hasMultiPlatform && controller.showFollowPlatformFilter.value)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 2),
+                child: DesktopHorizontalScroll(
+                  child: Row(
+                    children: [
+                      _buildPlatformChip(null, "全部"),
+                      ...platformIds.map((id) {
+                        final site = Sites.allSites[id]!;
+                        return _buildPlatformChip(id, site.name,
+                            logo: site.logo);
+                      }),
+                    ],
+                  ),
                 ),
               ),
+          ],
+        ),
+      );
+    });
+  }
+
+  Widget _buildPlatformChip(String? siteId, String label, {String? logo}) {
+    return Obx(() {
+      final selected = controller.followFilterSiteId.value == siteId;
+      final context = Get.context!;
+      return GestureDetector(
+        onTap: () => controller.setFollowFilterSiteId(siteId),
+        child: Container(
+          margin: const EdgeInsets.only(right: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: selected
+                ? Theme.of(context).colorScheme.primary.withAlpha(30)
+                : Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey.withAlpha(60),
             ),
-        ],
-      ),
-    );
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (logo != null) ...[
+                ClipOval(
+                  child: Image.asset(
+                    logo,
+                    width: 14,
+                    height: 14,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: selected
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
   }
 
   List<Widget> buildAppbarActions(BuildContext context) {
     return [
+      // 定时关闭启用时，AppBar 显示倒计时按钮，点击调整
+      Obx(
+        () => controller.autoExitEnable.value
+            ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: controller.showAutoExitSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.deepOrange.withAlpha(35),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.deepOrange.withAlpha(80),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.timer_outlined,
+                            size: 14,
+                            color: Colors.deepOrange,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            _formatCountdownShort(controller.countdown.value),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.deepOrange,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            : const SizedBox.shrink(),
+      ),
       if (Platform.isWindows)
         Obx(
           () => IconButton(
@@ -914,6 +1190,19 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         icon: const Icon(Icons.more_horiz),
       ),
     ];
+  }
+
+  /// 简短的倒计时格式，便于在 AppBar 显示
+  String _formatCountdownShort(int sec) {
+    if (sec < 0) sec = 0;
+    final h = sec ~/ 3600;
+    final m = (sec % 3600) ~/ 60;
+    final s = sec % 60;
+    String two(int n) => n.toString().padLeft(2, '0');
+    if (h > 0) {
+      return "${two(h)}:${two(m)}:${two(s)}";
+    }
+    return "${two(m)}:${two(s)}";
   }
 
   void showMore() {
@@ -1037,7 +1326,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   }
 
   String parseDuration(int sec) {
-    // 转为时分秒
+    if (sec < 0) sec = 0;
     var h = sec ~/ 3600;
     var m = (sec % 3600) ~/ 60;
     var s = sec % 60;
@@ -1048,6 +1337,18 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       return "${m.toString().padLeft(2, '0')}分钟${s.toString().padLeft(2, '0')}秒";
     }
     return "${s.toString().padLeft(2, '0')}秒";
+  }
+
+  /// 目标时间文案：今天 23:00 / 明天 08:00
+  String _targetTimeText(int targetMinutes) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    var target = today.add(Duration(minutes: targetMinutes));
+    final isToday = target.isAfter(now);
+    if (!isToday) target = target.add(const Duration(days: 1));
+    final h = (targetMinutes ~/ 60).toString().padLeft(2, '0');
+    final m = (targetMinutes % 60).toString().padLeft(2, '0');
+    return "${isToday ? '今天' : '明天'} $h:$m";
   }
 
   void showFollowUserOptionsInRoom(FollowUser item) {

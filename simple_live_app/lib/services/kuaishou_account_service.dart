@@ -76,15 +76,23 @@ class KuaishouAccountService extends GetxService {
   Future<void> verifyCookie() async {
     if (cookie.isEmpty) return;
     try {
-      final info = await KuaishouQRLogin.verifyByCookies(cookie);
-      if (info == null) {
-        // 服务端返回数据格式不匹配，不一定是失效，跳过
+      final result = await KuaishouQRLogin.verifyByCookiesFull(cookie);
+      if (result == null) {
         return;
       }
+      final info = result.info;
       if (info.userId.isEmpty) {
-        // 用户未登录，cookie 已失效
         SmartDialog.showToast("快手登录已失效，请重新登录");
         logout();
+        return;
+      }
+      if (result.effectiveCookie.isNotEmpty &&
+          result.effectiveCookie != cookie) {
+        setLogin(
+          cookie: result.effectiveCookie,
+          userName: info.name.isEmpty ? name.value : info.name,
+          userAvatar: info.avatar.isEmpty ? avatar.value : info.avatar,
+        );
         return;
       }
       name.value = info.name.isEmpty ? name.value : info.name;

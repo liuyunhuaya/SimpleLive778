@@ -73,10 +73,13 @@ class LiveRoomCard extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Image.asset(
-                          site.logo,
-                          width: 14,
-                          height: 14,
+                        ClipOval(
+                          child: Image.asset(
+                            site.logo,
+                            width: 14,
+                            height: 14,
+                            fit: BoxFit.cover,
+                          ),
                         ),
                         const SizedBox(width: 3),
                         Text(

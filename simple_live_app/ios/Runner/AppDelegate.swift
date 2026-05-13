@@ -8,16 +8,17 @@ import AVFoundation
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // 配置音频会话：使用 playback 类型并允许与其他音频混音 / 降低本应用音量
-    // 这样切到微信拍照、来电等场景时本应用可继续在后台播放，不会被强制中断
+    // 配置音频会话：使用 playback + mixWithOthers，允许与其他音频混音播放。
+    // 这样切到微信拍照、微信语音、来电等场景时本应用不会被强制暂停，
+    // 而是由 Dart 侧 audio_session 中断事件回调主动降低本应用音量。
     do {
       let session = AVAudioSession.sharedInstance()
       try session.setCategory(
         .playback,
         mode: .moviePlayback,
-        options: [.mixWithOthers, .duckOthers]
+        options: [.mixWithOthers]
       )
-      try session.setActive(true)
+      try session.setActive(true, options: .notifyOthersOnDeactivation)
     } catch {
       NSLog("AVAudioSession 设置失败: \(error)")
     }

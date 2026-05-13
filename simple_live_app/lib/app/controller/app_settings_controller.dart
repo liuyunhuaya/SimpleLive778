@@ -71,6 +71,13 @@ class AppSettingsController extends GetxController {
     roomAutoExitDuration.value = LocalStorageService.instance
         .getValue(LocalStorageService.kRoomAutoExitDuration, 60);
 
+    autoExitMode.value = LocalStorageService.instance
+        .getValue(LocalStorageService.kAutoExitMode, 0);
+
+    // 默认 23:00（23*60=1380）
+    autoExitTargetMinutes.value = LocalStorageService.instance
+        .getValue(LocalStorageService.kAutoExitTargetMinutes, 23 * 60);
+
     playerCompatMode.value = LocalStorageService.instance
         .getValue(LocalStorageService.kPlayerCompatMode, false);
 
@@ -372,6 +379,22 @@ class AppSettingsController extends GetxController {
     roomAutoExitDuration.value = e;
     LocalStorageService.instance
         .setValue(LocalStorageService.kRoomAutoExitDuration, e);
+  }
+
+  /// 定时关闭模式：0=倒计时，1=定时到某个时间点
+  var autoExitMode = 0.obs;
+  void setAutoExitMode(int e) {
+    autoExitMode.value = e;
+    LocalStorageService.instance
+        .setValue(LocalStorageService.kAutoExitMode, e);
+  }
+
+  /// 定时关闭目标时间点（一天中的分钟数 0-1439，例如 23:00 = 1380）
+  var autoExitTargetMinutes = (23 * 60).obs;
+  void setAutoExitTargetMinutes(int e) {
+    autoExitTargetMinutes.value = e;
+    LocalStorageService.instance
+        .setValue(LocalStorageService.kAutoExitTargetMinutes, e);
   }
 
   var playerCompatMode = false.obs;

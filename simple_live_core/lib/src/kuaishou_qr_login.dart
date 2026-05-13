@@ -2,70 +2,6 @@ import 'package:dio/dio.dart';
 import 'package:simple_live_core/src/common/core_log.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 
-/// 快手扫码登录状态
-enum KuaishouQRScanState {
-  /// 未扫描
-  unscanned,
-
-  /// 已扫描，未确认
-  scanned,
-
-  /// 已确认（acceptResult 拿到 qrToken）
-  accepted,
-
-  /// 二维码已过期
-  expired,
-
-  /// 失败
-  failed,
-}
-
-/// 快手扫码登录·获取二维码结果
-class KuaishouQRStartResult {
-  final String qrLoginToken;
-  final String qrLoginSignature;
-  final String qrUrl;
-
-  /// base64 PNG 二维码图（不带 data:image/png;base64, 前缀）
-  final String imageData;
-  final int expireTime;
-
-  KuaishouQRStartResult({
-    required this.qrLoginToken,
-    required this.qrLoginSignature,
-    required this.qrUrl,
-    required this.imageData,
-    required this.expireTime,
-  });
-}
-
-/// 扫码状态轮询返回
-class KuaishouQRScanResult {
-  final KuaishouQRScanState state;
-
-  /// 已扫描时的用户基本信息（昵称、头像）
-  final Map<String, dynamic>? user;
-
-  /// 已确认时返回的 qrToken
-  final String? qrToken;
-
-  KuaishouQRScanResult._(this.state, {this.user, this.qrToken});
-
-  factory KuaishouQRScanResult.unscanned() =>
-      KuaishouQRScanResult._(KuaishouQRScanState.unscanned);
-  factory KuaishouQRScanResult.scanned(Map user) => KuaishouQRScanResult._(
-      KuaishouQRScanState.scanned,
-      user: user.map((k, v) => MapEntry(k.toString(), v)));
-  factory KuaishouQRScanResult.accepted(String qrToken,
-          {Map<String, dynamic>? user}) =>
-      KuaishouQRScanResult._(KuaishouQRScanState.accepted,
-          qrToken: qrToken, user: user);
-  factory KuaishouQRScanResult.expired() =>
-      KuaishouQRScanResult._(KuaishouQRScanState.expired);
-  factory KuaishouQRScanResult.failed() =>
-      KuaishouQRScanResult._(KuaishouQRScanState.failed);
-}
-
 /// 登录后用户信息
 class KuaishouUserInfo {
   final String userId;
@@ -81,292 +17,227 @@ class KuaishouUserInfo {
   });
 }
 
-/// 快手扫码登录核心流程封装。
+/// 手动粘贴 Cookie 校验结果（含服务端下发的合并后的 Cookie，应优先持久化）
+class KuaishouCookieVerifyResult {
+  final KuaishouUserInfo info;
+  final String effectiveCookie;
+
+  KuaishouCookieVerifyResult({
+    required this.info,
+    required this.effectiveCookie,
+  });
+}
+
+/// 快手 Web 端 **Cookie 登录辅助类**。
 ///
-/// 流程（来自抓包）：
-/// 1. POST /rest/c/infra/ks/qr/start → 取 qrLoginToken / qrLoginSignature / imageData
-/// 2. 轮询 POST /rest/c/infra/ks/qr/scanResult → 用户用 APP 扫描后返回 result=1 + user
-/// 3. 轮询 POST /rest/c/infra/ks/qr/acceptResult → 用户在 APP 上确认后返回 result=1 + qrToken
-/// 4. POST /pass/kuaishou/login/qr/callback → 用 qrToken 换 passToken / kuaishou.live.web_st / userId
-/// 5. GET  /live_api/baseuser/userLogin → 完成 web 端登录态
-/// 6. GET  /live_api/baseuser/userinfo → 拉取登录后用户信息
+/// 历史背景：早期同时支持二维码扫码登录与 Cookie 登录，类名沿用 [KuaishouQRLogin]。
+/// 当前版本已**移除二维码扫码登录流程**（不可靠且需要 APP 配合），仅保留 Cookie 登录方式：
+/// 用户在浏览器登录 live.kuaishou.com 后导出 Cookie，粘贴进 APP 完成登录。
+///
+/// 核心能力（全部为静态方法）：
+/// - [normalizeKuaishouCookieHeader]：把浏览器复制的 Cookie 字符串规整为标准头
+/// - [mergeSetCookieIntoHeader]：把响应的 Set-Cookie 合并进现有 Cookie 头
+/// - [verifyByCookiesFull]：调用 `live_api/baseuser/userLogin` + `userinfo` 双接口完整校验，
+///   返回 [KuaishouCookieVerifyResult]（含服务端最新 Cookie，应持久化）
+/// - [verifyByCookies]：仅取用户信息，常用于启动时恢复登录态
 class KuaishouQRLogin {
+  /// live_api 接口必须的 sid 字段（保持兼容引用）
   static const String kSid = "kuaishou.live.web";
+
+  /// 登录链路统一使用桌面端 Chrome UA，避免被识别为 APP 端导致接口差异
   static const String kUserAgent =
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-  /// 在整个登录链路中累积维护的 cookies
-  String _cookies = "";
+  /// 接口 JSON 里 result 可能为 int / String / double，统一判定 1 为成功
+  static bool _ksApiOk(dynamic result) =>
+      result == 1 || result == "1" || result == 1.0;
 
-  String _qrLoginToken = "";
-  String _qrLoginSignature = "";
-  int _expireTime = 0;
-
-  String get cookies => _cookies;
-  String get qrLoginToken => _qrLoginToken;
-
-  /// 快手后端给出的二维码绝对过期时间（毫秒时间戳）
-  int get expireTime => _expireTime;
-
-  Map<String, String> _headers({String? referer, String? origin}) {
+  /// live.kuaishou.com baseuser 接口与浏览器一致：POST + JSON
+  static Map<String, dynamic> _liveBaseuserHeaders(String cookie) {
     return {
       "User-Agent": kUserAgent,
       "Accept": "application/json, text/plain, */*",
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-      "Origin": origin ?? "https://live.kuaishou.com",
-      "Referer": referer ?? "https://live.kuaishou.com/",
-      if (_cookies.isNotEmpty) "Cookie": _cookies,
+      "Origin": "https://live.kuaishou.com",
+      "Referer": "https://live.kuaishou.com/",
+      if (cookie.isNotEmpty) "Cookie": cookie,
     };
   }
 
-  /// 解析并合并 set-cookie
-  void _accumulateCookies(Response resp) {
-    final raw = resp.headers.map['set-cookie'];
-    if (raw == null || raw.isEmpty) return;
-    final pairs = <String, String>{};
-    // 解析当前 _cookies
-    for (final c in _cookies.split(';')) {
-      final p = c.trim();
-      if (p.isEmpty) continue;
-      final eq = p.indexOf('=');
-      if (eq > 0) {
-        pairs[p.substring(0, eq).trim()] = p.substring(eq + 1).trim();
-      }
-    }
-    for (final c in raw) {
-      final p = c.split(';').first.trim();
-      if (p.isEmpty) continue;
-      final eq = p.indexOf('=');
-      if (eq > 0) {
-        pairs[p.substring(0, eq).trim()] = p.substring(eq + 1).trim();
-      }
-    }
-    _cookies = pairs.entries.map((e) => "${e.key}=${e.value}").join("; ");
+  /// POST `/live_api/baseuser/userinfo`，body 为 `{}`（与 DevTools 抓包一致）
+  static Future<Response> _postBaseuserUserinfo(
+    Dio dio,
+    String cookie,
+  ) {
+    return dio.post(
+      "https://live.kuaishou.com/live_api/baseuser/userinfo",
+      data: const <String, dynamic>{},
+      options: Options(
+        headers: {
+          ..._liveBaseuserHeaders(cookie),
+          "Content-Type": "application/json",
+        },
+        responseType: ResponseType.json,
+        validateStatus: (_) => true,
+      ),
+    );
   }
 
-  /// 1. 启动登录·获取二维码
-  Future<KuaishouQRStartResult> start() async {
-    // 先访问 live.kuaishou.com 获取基础 cookies（did/clientid 等）
+  /// 规范化浏览器/application 面板导出的 Cookie 字符串。
+  /// - 去掉 `Cookie:` 前缀与换行
+  /// - 同一 key 出现多次时保留最后一次（与 Chrome 合并行为一致，修复重复 did/userId）
+  /// - 不含 `kpn` 时补 `GAME_ZONE`（与登录回调一致）
+  static String normalizeKuaishouCookieHeader(String raw) {
+    var s = raw.trim();
+    if (s.toLowerCase().startsWith("cookie:")) {
+      s = s.substring(7).trim();
+    }
+    s = s.replaceAll(RegExp(r"[\r\n]+"), " ");
+    final pairs = <String, String>{};
+    for (final segment in s.split(";")) {
+      final p = segment.trim();
+      if (p.isEmpty) continue;
+      final eq = p.indexOf("=");
+      if (eq <= 0) continue;
+      final key = p.substring(0, eq).trim();
+      var val = p.substring(eq + 1).trim();
+      if (key.isEmpty) continue;
+      if ((val.startsWith('"') && val.endsWith('"')) ||
+          (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.substring(1, val.length - 1);
+      }
+      pairs[key] = val;
+    }
+    pairs.putIfAbsent("kpn", () => "GAME_ZONE");
+    return pairs.entries.map((e) => "${e.key}=${e.value}").join("; ");
+  }
+
+  static Map<String, String> _cookieHeaderToMap(String cookie) {
+    final pairs = <String, String>{};
+    for (final segment in cookie.split(";")) {
+      final p = segment.trim();
+      if (p.isEmpty) continue;
+      final eq = p.indexOf("=");
+      if (eq <= 0) continue;
+      final key = p.substring(0, eq).trim();
+      final val = p.substring(eq + 1).trim();
+      if (key.isNotEmpty) pairs[key] = val;
+    }
+    return pairs;
+  }
+
+  static String _mapToCookieHeader(Map<String, String> pairs) =>
+      pairs.entries.map((e) => "${e.key}=${e.value}").join("; ");
+
+  /// 把响应 Set-Cookie 合并进现有 Cookie 头
+  static String mergeSetCookieIntoHeader(String cookieHeader, Response resp) {
+    final pairs = _cookieHeaderToMap(cookieHeader);
+    final raw = resp.headers.map["set-cookie"];
+    if (raw == null || raw.isEmpty) {
+      return _mapToCookieHeader(pairs);
+    }
+    for (final c in raw) {
+      final first = c.split(";").first.trim();
+      if (first.isEmpty) continue;
+      final eq = first.indexOf("=");
+      if (eq > 0) {
+        pairs[first.substring(0, eq).trim()] =
+            first.substring(eq + 1).trim();
+      }
+    }
+    return _mapToCookieHeader(pairs);
+  }
+
+  static KuaishouUserInfo? _parseUserinfoResponse(
+    dynamic data, {
+    String? cookieUserIdFallback,
+  }) {
+    if (data is! Map) return null;
+    final wrap = data["data"];
+    if (wrap is! Map) return null;
+    Map? info = wrap["ownerInfo"] as Map?;
+    info ??= wrap["userInfo"] as Map?;
+    if (info == null) return null;
+
+    var userId = "${info["originUserId"] ?? ""}".trim();
+    if (userId.isEmpty) {
+      userId = "${info["userId"] ?? ""}".trim();
+    }
+    var eid = "${info["id"] ?? info["eid"] ?? ""}".trim();
+    final name = info["name"]?.toString() ?? "";
+    final avatar = (info["avatar"] ?? info["headUrl"] ?? "").toString();
+
+    if (userId.isEmpty && eid.isNotEmpty) {
+      userId = eid;
+    }
+    if (userId.isEmpty &&
+        cookieUserIdFallback != null &&
+        cookieUserIdFallback.isNotEmpty) {
+      userId = cookieUserIdFallback;
+    }
+    if (eid.isEmpty && userId.isNotEmpty) {
+      eid = userId;
+    }
+    if (userId.isEmpty && name.isEmpty && avatar.isEmpty) {
+      return null;
+    }
+    return KuaishouUserInfo(
+      userId: userId,
+      eid: eid,
+      name: name,
+      avatar: avatar,
+    );
+  }
+
+  /// 完整 Cookie 校验：先 `userLogin` 再 `userinfo`，并合并服务端 Set-Cookie。
+  ///
+  /// 入参 [rawCookies] 接受用户从浏览器复制的任意格式（含 `Cookie:` 前缀、换行、重复 key 都可），
+  /// 返回 [KuaishouCookieVerifyResult]（包含合并后的 effectiveCookie，应替换持久化）。
+  /// 校验失败 / 用户未登录返回 null。
+  static Future<KuaishouCookieVerifyResult?> verifyByCookiesFull(
+      String rawCookies) async {
     try {
-      final r = await HttpClient.instance.dio.get(
-        "https://live.kuaishou.com/",
+      final normalized = normalizeKuaishouCookieHeader(rawCookies);
+      if (normalized.isEmpty) return null;
+
+      final cookieMap = _cookieHeaderToMap(normalized);
+      final cookieUserIdFallback = cookieMap["userId"];
+
+      var merged = normalized;
+
+      final loginResp = await HttpClient.instance.dio.get(
+        "https://live.kuaishou.com/live_api/baseuser/userLogin",
         options: Options(
           headers: {
             "User-Agent": kUserAgent,
-            "Accept":
-                "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Origin": "https://live.kuaishou.com",
+            "Referer": "https://live.kuaishou.com/",
+            "Accept": "application/json, text/plain, */*",
+            "Cookie": merged,
           },
-          followRedirects: true,
-          validateStatus: (_) => true,
-          responseType: ResponseType.plain,
-        ),
-      );
-      _accumulateCookies(r);
-    } catch (e) {
-      CoreLog.error(e);
-    }
-
-    final resp = await HttpClient.instance.dio.post(
-      "https://id.kuaishou.com/rest/c/infra/ks/qr/start",
-      queryParameters: const {"sid": kSid},
-      data: "sid=$kSid",
-      options: Options(
-        headers: _headers(referer: "https://live.kuaishou.com/"),
-        contentType: Headers.formUrlEncodedContentType,
-        responseType: ResponseType.json,
-        validateStatus: (_) => true,
-      ),
-    );
-    _accumulateCookies(resp);
-    final data = resp.data;
-    if (data is! Map) throw "快手二维码请求失败";
-    if (data["result"] != 1) {
-      throw (data["error_msg"] ?? "二维码请求失败").toString();
-    }
-    _qrLoginToken = data["qrLoginToken"]?.toString() ?? "";
-    _qrLoginSignature = data["qrLoginSignature"]?.toString() ?? "";
-    _expireTime = int.tryParse(data["expireTime"]?.toString() ?? "0") ?? 0;
-    return KuaishouQRStartResult(
-      qrLoginToken: _qrLoginToken,
-      qrLoginSignature: _qrLoginSignature,
-      qrUrl: data["qrUrl"]?.toString() ?? "",
-      imageData: data["imageData"]?.toString() ?? "",
-      expireTime: _expireTime,
-    );
-  }
-
-  /// 通用·判断接口响应里是否明确意味着二维码过期。
-  /// 只通过 error_msg 文本判定（"过期/失效/expire"），不再使用任何硬编码 result 数字，
-  /// 避免把"未扫描/中间状态"码误判为过期。客户端额外用 expireTime 做兜底超时。
-  bool _isExpired(Map data) {
-    final msg = (data["error_msg"] ?? data["errorMsg"] ?? "").toString();
-    if (msg.isEmpty) return false;
-    final lower = msg.toLowerCase();
-    return msg.contains("过期") ||
-        msg.contains("失效") ||
-        lower.contains("expire") ||
-        lower.contains("invalid");
-  }
-
-  /// 2. 轮询扫描状态
-  Future<KuaishouQRScanResult> pollScanResult() async {
-    if (_qrLoginToken.isEmpty) return KuaishouQRScanResult.failed();
-    try {
-      final resp = await HttpClient.instance.dio.post(
-        "https://id.kuaishou.com/rest/c/infra/ks/qr/scanResult",
-        queryParameters: {
-          "qrLoginToken": _qrLoginToken,
-          "qrLoginSignature": _qrLoginSignature,
-          "sid": kSid,
-        },
-        data:
-            "qrLoginToken=$_qrLoginToken&qrLoginSignature=$_qrLoginSignature&sid=$kSid",
-        options: Options(
-          headers: _headers(),
-          contentType: Headers.formUrlEncodedContentType,
           responseType: ResponseType.json,
           validateStatus: (_) => true,
         ),
       );
-      _accumulateCookies(resp);
-      final data = resp.data;
-      if (data is! Map) return KuaishouQRScanResult.unscanned();
-      final code = data["result"];
-      if (code == 1 && data["user"] is Map) {
-        return KuaishouQRScanResult.scanned(data["user"] as Map);
-      }
-      if (_isExpired(data)) return KuaishouQRScanResult.expired();
-      return KuaishouQRScanResult.unscanned();
-    } catch (e) {
-      CoreLog.error(e);
-      return KuaishouQRScanResult.unscanned();
-    }
-  }
+      merged = mergeSetCookieIntoHeader(merged, loginResp);
 
-  /// 3. 轮询确认状态
-  Future<KuaishouQRScanResult> pollAcceptResult() async {
-    if (_qrLoginToken.isEmpty) return KuaishouQRScanResult.failed();
-    try {
-      final resp = await HttpClient.instance.dio.post(
-        "https://id.kuaishou.com/rest/c/infra/ks/qr/acceptResult",
-        queryParameters: {
-          "qrLoginToken": _qrLoginToken,
-          "qrLoginSignature": _qrLoginSignature,
-          "sid": kSid,
-        },
-        data:
-            "qrLoginToken=$_qrLoginToken&qrLoginSignature=$_qrLoginSignature&sid=$kSid",
-        options: Options(
-          headers: _headers(),
-          contentType: Headers.formUrlEncodedContentType,
-          responseType: ResponseType.json,
-          validateStatus: (_) => true,
-        ),
+      final resp =
+          await _postBaseuserUserinfo(HttpClient.instance.dio, merged);
+      merged = mergeSetCookieIntoHeader(merged, resp);
+
+      final info = _parseUserinfoResponse(
+        resp.data,
+        cookieUserIdFallback: cookieUserIdFallback,
       );
-      _accumulateCookies(resp);
-      final data = resp.data;
-      if (data is! Map) return KuaishouQRScanResult.scanned(const {});
-      final code = data["result"];
-      final qrToken = data["qrToken"]?.toString() ?? "";
-      if (code == 1 && qrToken.isNotEmpty) {
-        return KuaishouQRScanResult.accepted(qrToken);
-      }
-      // 仅在明确过期信号时才判定为过期，避免手机刚点确认时瞬时错误码造成误判
-      if (_isExpired(data)) return KuaishouQRScanResult.expired();
-      return KuaishouQRScanResult.scanned(const {});
-    } catch (e) {
-      CoreLog.error(e);
-      return KuaishouQRScanResult.scanned(const {});
-    }
-  }
+      if (info == null) return null;
+      if (info.userId.isEmpty) return null;
 
-  /// 4. 用 qrToken 换 passToken / kuaishou.live.web_st / userId
-  Future<bool> callback(String qrToken) async {
-    final resp = await HttpClient.instance.dio.post(
-      "https://id.kuaishou.com/pass/kuaishou/login/qr/callback",
-      queryParameters: {"qrToken": qrToken, "sid": kSid},
-      data: "qrToken=$qrToken&sid=$kSid",
-      options: Options(
-        headers: _headers(),
-        contentType: Headers.formUrlEncodedContentType,
-        responseType: ResponseType.json,
-        validateStatus: (_) => true,
-      ),
-    );
-    _accumulateCookies(resp);
-    final data = resp.data;
-    if (data is! Map || data["result"] != 1) return false;
+      // 静默调用 _ksApiOk 让其不被 unused 提示（保留以便将来需要从 result 字段判定时复用）
+      _ksApiOk(loginResp.data is Map ? loginResp.data["result"] : null);
 
-    // 把响应里返回的 token 也写入 cookies（部分服务端不通过 set-cookie 下发）
-    final pairs = <String, String>{};
-    for (final c in _cookies.split(';')) {
-      final p = c.trim();
-      if (p.isEmpty) continue;
-      final eq = p.indexOf('=');
-      if (eq > 0) {
-        pairs[p.substring(0, eq).trim()] = p.substring(eq + 1).trim();
-      }
-    }
-    final passToken = data["passToken"]?.toString() ?? "";
-    final webSt = data["kuaishou.live.web_st"]?.toString() ?? "";
-    final webAt = data["kuaishou.live.web.at"]?.toString() ?? "";
-    final userId = data["userId"]?.toString() ?? "";
-    if (passToken.isNotEmpty) pairs["passToken"] = passToken;
-    if (webSt.isNotEmpty) pairs["kuaishou.live.web_st"] = webSt;
-    if (webAt.isNotEmpty) pairs["kuaishou.live.web.at"] = webAt;
-    if (userId.isNotEmpty) pairs["userId"] = userId;
-    pairs["kpn"] = "GAME_ZONE";
-    _cookies = pairs.entries.map((e) => "${e.key}=${e.value}").join("; ");
-    return true;
-  }
-
-  /// 5. 完成 web 端登录态
-  Future<bool> webLogin() async {
-    try {
-      final resp = await HttpClient.instance.dio.get(
-        "https://live.kuaishou.com/live_api/baseuser/userLogin",
-        options: Options(
-          headers: _headers(),
-          responseType: ResponseType.json,
-          validateStatus: (_) => true,
-        ),
-      );
-      _accumulateCookies(resp);
-      final data = resp.data;
-      if (data is Map && data["data"] is Map) {
-        return data["data"]["result"] == 1;
-      }
-      return false;
-    } catch (e) {
-      CoreLog.error(e);
-      return false;
-    }
-  }
-
-  /// 6. 拉取用户信息
-  Future<KuaishouUserInfo?> fetchUserInfo() async {
-    try {
-      final resp = await HttpClient.instance.dio.get(
-        "https://live.kuaishou.com/live_api/baseuser/userinfo",
-        options: Options(
-          headers: _headers(),
-          responseType: ResponseType.json,
-          validateStatus: (_) => true,
-        ),
-      );
-      _accumulateCookies(resp);
-      final data = resp.data;
-      if (data is! Map) return null;
-      final wrap = data["data"];
-      if (wrap is! Map) return null;
-      final info = wrap["ownerInfo"];
-      if (info is! Map) return null;
-      return KuaishouUserInfo(
-        userId: info["originUserId"]?.toString() ?? "",
-        eid: info["id"]?.toString() ?? "",
-        name: info["name"]?.toString() ?? "",
-        avatar: info["avatar"]?.toString() ?? "",
+      return KuaishouCookieVerifyResult(
+        info: info,
+        effectiveCookie: merged,
       );
     } catch (e) {
       CoreLog.error(e);
@@ -376,36 +247,7 @@ class KuaishouQRLogin {
 
   /// 用已有 cookies 直接验证用户信息（用于持久化恢复登录态）
   static Future<KuaishouUserInfo?> verifyByCookies(String cookies) async {
-    try {
-      final resp = await HttpClient.instance.dio.get(
-        "https://live.kuaishou.com/live_api/baseuser/userinfo",
-        options: Options(
-          headers: {
-            "User-Agent": kUserAgent,
-            "Origin": "https://live.kuaishou.com",
-            "Referer": "https://live.kuaishou.com/",
-            "Accept": "application/json, text/plain, */*",
-            if (cookies.isNotEmpty) "Cookie": cookies,
-          },
-          responseType: ResponseType.json,
-          validateStatus: (_) => true,
-        ),
-      );
-      final data = resp.data;
-      if (data is! Map) return null;
-      final wrap = data["data"];
-      if (wrap is! Map) return null;
-      final info = wrap["ownerInfo"];
-      if (info is! Map) return null;
-      return KuaishouUserInfo(
-        userId: info["originUserId"]?.toString() ?? "",
-        eid: info["id"]?.toString() ?? "",
-        name: info["name"]?.toString() ?? "",
-        avatar: info["avatar"]?.toString() ?? "",
-      );
-    } catch (e) {
-      CoreLog.error(e);
-      return null;
-    }
+    final r = await verifyByCookiesFull(cookies);
+    return r?.info;
   }
 }

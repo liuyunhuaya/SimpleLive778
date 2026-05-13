@@ -144,17 +144,41 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
   }
 
+  /// 当前定时关闭模式：0=倒计时（房间内时长），1=定时到某个时间点
+  /// 仅在使用全局定时关闭时才有效，房间内手动设置始终为倒计时模式
+  var autoExitMode = 0.obs;
+
+  /// 全局定时关闭的目标时间点（HHmm 形式的"一天中的分钟数"）
+  var autoExitTargetMinutes = 0.obs;
+
   /// 初始化自动关闭倒计时
   void initAutoExit() {
     if (AppSettingsController.instance.autoExitEnable.value) {
       autoExitEnable.value = true;
+      autoExitMode.value = AppSettingsController.instance.autoExitMode.value;
+      autoExitTargetMinutes.value =
+          AppSettingsController.instance.autoExitTargetMinutes.value;
       autoExitMinutes.value =
           AppSettingsController.instance.autoExitDuration.value;
       setAutoExit();
     } else {
+      autoExitMode.value = 0;
       autoExitMinutes.value =
           AppSettingsController.instance.roomAutoExitDuration.value;
     }
+  }
+
+  /// 计算从现在到目标时间点的剩余秒数
+  /// - 如果目标时间点已过去，则推到次日同一时间
+  int _secondsToTargetTime(int targetMinutes) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    var target = today.add(Duration(minutes: targetMinutes));
+    if (!target.isAfter(now)) {
+      target = target.add(const Duration(days: 1));
+    }
+    final diff = target.difference(now);
+    return diff.inSeconds;
   }
 
   void setAutoExit() {
@@ -163,9 +187,19 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return;
     }
     autoExitTimer?.cancel();
-    countdown.value = autoExitMinutes.value * 60;
+    // 计算初始倒计时秒数
+    if (autoExitMode.value == 1) {
+      countdown.value = _secondsToTargetTime(autoExitTargetMinutes.value);
+    } else {
+      countdown.value = autoExitMinutes.value * 60;
+    }
     autoExitTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      countdown.value -= 1;
+      // 定时模式下每秒重算，避免设备休眠/暂停后倒计时不准
+      if (autoExitMode.value == 1) {
+        countdown.value = _secondsToTargetTime(autoExitTargetMinutes.value);
+      } else {
+        countdown.value -= 1;
+      }
       if (countdown.value <= 0) {
         timer = Timer(const Duration(seconds: 10), () async {
           await WakelockPlus.disable();
@@ -177,6 +211,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         if (delay) {
           timer.cancel();
           delayAutoExit.value = true;
+          // 延迟时切回倒计时模式，让用户用 showAutoExitSheet 重新选择
+          autoExitMode.value = 0;
           showAutoExitSheet();
           setAutoExit();
         } else {
@@ -358,12 +394,39 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       liveDanmaku.start(detail.value?.danmakuData);
       startLiveDurationTimer(); // 启动开播时长定时器
       startOnlineRefreshTimer(); // 启动人数刷新定时器
+      // 房间数据就绪后，对支持榜单的平台静默后台拉取一次榜单，
+      // 避免用户切换直播间后点击"榜单"看到的是上一房间的残留或空白
+      _autoFetchLiveRanksIfSupported();
     } catch (e) {
       Log.logPrint(e);
       loadError.value = true;
       error = e.toString();
     } finally {
       isPlayerLoading.value = false;
+    }
+  }
+
+  /// 在后台静默拉取一次当前直播间的榜单数据
+  /// - 仅当当前平台支持榜单时执行
+  /// - 不显示 loading，不影响主交互
+  /// - 拉取结果会通过 liveRankResult.value 通知到榜单 tab
+  void _autoFetchLiveRanksIfSupported() {
+    try {
+      if (detail.value == null) return;
+      if (!site.liveSite.supportLiveRank) return;
+      final fetchSite = site;
+      final fetchRoomId = roomId;
+      // 静默拉取：不动 isLoadingRank，避免触发 UI loading
+      fetchSite.liveSite.getLiveRanks(detail: detail.value!).then((result) {
+        // 写入结果前再次校验房间未切换，避免覆盖新房间的数据
+        if (rxSite.value.id == fetchSite.id && rxRoomId.value == fetchRoomId) {
+          liveRankResult.value = result;
+        }
+      }).catchError((e) {
+        Log.d("静默拉取榜单失败: $e");
+      });
+    } catch (e) {
+      Log.logPrint(e);
     }
   }
   
@@ -613,6 +676,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     var history = DBService.instance.getHistory(id);
     if (history != null) {
       history.updateTime = DateTime.now();
+      // 同步更新头像和昵称，确保历史记录里的头像始终是最新的
+      final newFace = detail.value?.userAvatar ?? "";
+      final newName = detail.value?.userName ?? "";
+      if (newFace.isNotEmpty) {
+        history.face = newFace;
+      }
+      if (newName.isNotEmpty) {
+        history.userName = newName;
+      }
     }
     history ??= History(
       id: id,
@@ -957,16 +1029,23 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     showModalBottomSheet(
       context: Get.context!,
       constraints: const BoxConstraints(maxWidth: 600),
+      // 允许超过半屏的高度，否则关注/记录列表会被严重压缩
+      isScrollControlled: true,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(12),
           topRight: Radius.circular(12),
         ),
       ),
-      builder: (_) => FollowHistoryOverlay(
-        controller: this,
-        isBottomSheet: true,
-        onDismiss: () => Get.back(),
+      builder: (ctx) => SizedBox(
+        // 占屏幕高度的 80%，提供舒适的浏览空间
+        height: MediaQuery.of(ctx).size.height * 0.8,
+        child: FollowHistoryOverlay(
+          controller: this,
+          isBottomSheet: true,
+          onDismiss: () => Get.back(),
+        ),
       ),
     );
   }
@@ -980,6 +1059,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     Utils.showBottomSheet(
       title: "定时关闭",
       child: ListView(
+        shrinkWrap: true,
         children: [
           Obx(
             () => SwitchListTile(
@@ -990,53 +1070,186 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
               value: autoExitEnable.value,
               onChanged: (e) {
                 autoExitEnable.value = e;
-
                 setAutoExit();
-                //controller.setAutoExitEnable(e);
               },
             ),
           ),
+          // 模式选择
           Obx(
-            () => ListTile(
-              enabled: autoExitEnable.value,
-              title: Text(
-                "自动关闭时间：${autoExitMinutes.value ~/ 60}小时${autoExitMinutes.value % 60}分钟",
-                style: Get.textTheme.titleMedium,
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () async {
-                var value = await showTimePicker(
-                  context: Get.context!,
-                  initialTime: TimeOfDay(
-                    hour: autoExitMinutes.value ~/ 60,
-                    minute: autoExitMinutes.value % 60,
-                  ),
-                  initialEntryMode: TimePickerEntryMode.inputOnly,
-                  builder: (_, child) {
-                    return MediaQuery(
-                      data: Get.mediaQuery.copyWith(
-                        alwaysUse24HourFormat: true,
+            () => Visibility(
+              visible: autoExitEnable.value,
+              child: Padding(
+                padding: AppStyle.edgeInsetsH12.copyWith(top: 4, bottom: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _buildSheetModeChip(
+                        0,
+                        "倒计时",
+                        Icons.hourglass_bottom,
                       ),
-                      child: child!,
-                    );
-                  },
-                );
-                if (value == null || (value.hour == 0 && value.minute == 0)) {
-                  return;
-                }
-                var duration =
-                    Duration(hours: value.hour, minutes: value.minute);
-                autoExitMinutes.value = duration.inMinutes;
-                AppSettingsController.instance
-                    .setRoomAutoExitDuration(autoExitMinutes.value);
-                //setAutoExitDuration(duration.inMinutes);
-                setAutoExit();
-              },
+                    ),
+                    AppStyle.hGap8,
+                    Expanded(
+                      child: _buildSheetModeChip(
+                        1,
+                        "定时关闭",
+                        Icons.alarm,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // 倒计时模式：选择时长
+          Obx(
+            () => Visibility(
+              visible: autoExitEnable.value && autoExitMode.value == 0,
+              child: ListTile(
+                enabled: autoExitEnable.value,
+                title: Text(
+                  "倒计时时长：${autoExitMinutes.value ~/ 60}小时${autoExitMinutes.value % 60}分钟",
+                  style: Get.textTheme.titleMedium,
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  var value = await showTimePicker(
+                    context: Get.context!,
+                    initialTime: TimeOfDay(
+                      hour: autoExitMinutes.value ~/ 60,
+                      minute: autoExitMinutes.value % 60,
+                    ),
+                    initialEntryMode: TimePickerEntryMode.inputOnly,
+                    builder: (_, child) {
+                      return MediaQuery(
+                        data: Get.mediaQuery.copyWith(
+                          alwaysUse24HourFormat: true,
+                        ),
+                        child: child!,
+                      );
+                    },
+                  );
+                  if (value == null ||
+                      (value.hour == 0 && value.minute == 0)) {
+                    return;
+                  }
+                  var duration =
+                      Duration(hours: value.hour, minutes: value.minute);
+                  autoExitMinutes.value = duration.inMinutes;
+                  AppSettingsController.instance
+                      .setRoomAutoExitDuration(autoExitMinutes.value);
+                  setAutoExit();
+                },
+              ),
+            ),
+          ),
+          // 定时模式：选择某个时间点
+          Obx(
+            () => Visibility(
+              visible: autoExitEnable.value && autoExitMode.value == 1,
+              child: ListTile(
+                enabled: autoExitEnable.value,
+                title: Text(
+                  "目标时间：${_formatHHmm(autoExitTargetMinutes.value)}",
+                  style: Get.textTheme.titleMedium,
+                ),
+                subtitle: Text(
+                  "到达该时间点自动关闭，若已过则推到次日",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final defaultMin = autoExitTargetMinutes.value > 0
+                      ? autoExitTargetMinutes.value
+                      : 23 * 60;
+                  var value = await showTimePicker(
+                    context: Get.context!,
+                    initialTime: TimeOfDay(
+                      hour: defaultMin ~/ 60,
+                      minute: defaultMin % 60,
+                    ),
+                    initialEntryMode: TimePickerEntryMode.dial,
+                    builder: (_, child) {
+                      return MediaQuery(
+                        data: Get.mediaQuery.copyWith(
+                          alwaysUse24HourFormat: true,
+                        ),
+                        child: child!,
+                      );
+                    },
+                  );
+                  if (value == null) return;
+                  autoExitTargetMinutes.value =
+                      value.hour * 60 + value.minute;
+                  setAutoExit();
+                },
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildSheetModeChip(int mode, String title, IconData icon) {
+    return Obx(
+      () {
+        final selected = autoExitMode.value == mode;
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () {
+              autoExitMode.value = mode;
+              setAutoExit();
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+              decoration: BoxDecoration(
+                color: selected
+                    ? Get.theme.colorScheme.primary.withAlpha(30)
+                    : Get.theme.cardColor,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected
+                      ? Get.theme.colorScheme.primary
+                      : Colors.grey.withAlpha(60),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 16,
+                    color: selected ? Get.theme.colorScheme.primary : null,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? Get.theme.colorScheme.primary : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatHHmm(int minutes) {
+    final h = (minutes ~/ 60).toString().padLeft(2, '0');
+    final m = (minutes % 60).toString().padLeft(2, '0');
+    return "$h:$m";
   }
 
   void openNaviteAPP() async {
@@ -1110,22 +1323,42 @@ $error''');
   void _initAudioSession() async {
     if (!Platform.isIOS) return;
     final session = await AudioSession.instance;
-    await session.configure(const AudioSessionConfiguration.music());
+    // 关键：iOS 配置 mixWithOthers + duckOthers，
+    // 微信语音、拍照等其他 App 占用音频时不会强制暂停我们的直播音频，
+    // 仅由系统自动 ducking 降低本应用音量，避免直播突然停止。
+    await session.configure(
+      const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playback,
+        avAudioSessionCategoryOptions:
+            AVAudioSessionCategoryOptions.mixWithOthers,
+        avAudioSessionMode: AVAudioSessionMode.moviePlayback,
+        avAudioSessionRouteSharingPolicy:
+            AVAudioSessionRouteSharingPolicy.defaultPolicy,
+        avAudioSessionSetActiveOptions:
+            AVAudioSessionSetActiveOptions.notifyOthersOnDeactivation,
+      ),
+    );
+    try {
+      await session.setActive(true);
+    } catch (e) {
+      Log.logPrint(e);
+    }
     _audioInterruptionSub = session.interruptionEventStream.listen((event) {
       if (event.begin) {
-        // 其他 App 开始占用音频（如微信语音）
+        // 其他 App 开始占用音频（如微信语音、拍照、来电）：
+        // 不暂停播放，仅显著降低音量，待对方释放后再恢复。
         if (!isManualPaused.value) {
           try {
             final cur = AppSettingsController.instance.playerVolume.value;
             _volumeBeforeBackground = cur;
-            final reduced = (cur * 0.3).clamp(5.0, 100.0);
+            final reduced = (cur * 0.2).clamp(5.0, 100.0);
             player.setVolume(reduced);
           } catch (e) {
             Log.logPrint(e);
           }
         }
       } else {
-        // 其他 App 释放音频焦点
+        // 其他 App 释放音频焦点：恢复原音量，并保证播放继续
         if (_volumeBeforeBackground != null) {
           try {
             player.setVolume(_volumeBeforeBackground!);
@@ -1133,6 +1366,14 @@ $error''');
             Log.logPrint(e);
           }
           _volumeBeforeBackground = null;
+        }
+        // 部分场景下系统仍会触发暂停，尽量恢复播放
+        if (!isManualPaused.value) {
+          try {
+            player.play();
+          } catch (e) {
+            Log.logPrint(e);
+          }
         }
       }
     });
@@ -1305,6 +1546,51 @@ $error''');
 
   /// 是否正在加载榜单
   var isLoadingRank = false.obs;
+
+  /// 直播间内"关注"Tab 中是否显示平台筛选按钮行
+  /// - 默认隐藏，隐藏时显示全部关注且正在直播的主播
+  /// - 显示后可按平台筛选
+  var showFollowPlatformFilter = false.obs;
+
+  /// 直播间内"关注"Tab 当前选中的平台筛选（null = 全部平台）
+  Rx<String?> followFilterSiteId = Rx<String?>(null);
+
+  /// 切换平台筛选行的显示状态
+  /// - 隐藏时会自动重置筛选为"全部"
+  void toggleFollowPlatformFilter() {
+    showFollowPlatformFilter.value = !showFollowPlatformFilter.value;
+    if (!showFollowPlatformFilter.value) {
+      followFilterSiteId.value = null;
+    }
+  }
+
+  /// 设置当前的平台筛选
+  void setFollowFilterSiteId(String? siteId) {
+    followFilterSiteId.value = siteId;
+  }
+
+  /// 当前关注Tab中应展示的主播列表
+  /// - 始终基于"正在直播"的列表过滤
+  /// - 当筛选平台为 null 时展示全部平台
+  /// - 置顶顺序由 FollowService.filterData 保证，这里不再二次重排
+  List<FollowUser> get filteredLiveFollowList {
+    final base = FollowService.instance.liveList;
+    // 显式访问 length 触发 GetX 响应式收集，
+    // 确保 liveList 内容变化时能被外层 Obx 检测到刷新
+    final _ = base.length;
+    final siteId = followFilterSiteId.value;
+    if (siteId == null) return base.toList();
+    return base.where((u) => u.siteId == siteId).toList();
+  }
+
+  /// 当前关注列表中实际存在直播状态主播的平台ID列表（按 Sites.allSites 顺序）
+  List<String> get followPlatformIdsForFilter {
+    final follow = FollowService.instance.followList;
+    // 同样显式访问 length 触发收集
+    final _ = follow.length;
+    final ids = follow.map((u) => u.siteId).toSet();
+    return Sites.allSites.keys.where((k) => ids.contains(k)).toList();
+  }
 
   /// Windows 窗口置顶状态
   var isAlwaysOnTop = false.obs;

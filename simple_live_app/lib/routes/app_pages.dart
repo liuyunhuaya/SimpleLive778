@@ -27,8 +27,6 @@ import 'package:simple_live_app/modules/mine/account/account_controller.dart';
 import 'package:simple_live_app/modules/mine/account/account_page.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/qr_login_controller.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/qr_login_page.dart';
-import 'package:simple_live_app/modules/mine/account/kuaishou/qr_login_controller.dart';
-import 'package:simple_live_app/modules/mine/account/kuaishou/qr_login_page.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/web_login_controller.dart';
 import 'package:simple_live_app/modules/mine/account/bilibili/web_login_page.dart';
 import 'package:simple_live_app/modules/settings/appstyle_setting_page.dart';
@@ -172,14 +170,6 @@ class AppPages {
       page: () => const BiliBiliQRLoginPage(),
       bindings: [
         BindingsBuilder.put(() => BiliBiliQRLoginController()),
-      ],
-    ),
-    // 快手二维码登录
-    GetPage(
-      name: RoutePath.kKuaishouQRLogin,
-      page: () => const KuaishouQRLoginPage(),
-      bindings: [
-        BindingsBuilder.put(() => KuaishouQRLoginController()),
       ],
     ),
     // 数据同步
