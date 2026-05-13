@@ -347,6 +347,12 @@ class ParseController extends GetxController {
 
   /// 跟随多层 302/301 重定向，返回完整重定向链路（包含原 URL 与所有跳转后的 URL）。
   /// 部分快手短链需要跳 3 ~ 5 跳才能到 live.kuaishou.com 或 chenzhongtech.com。
+  ///
+  /// **关键实现细节**：
+  /// `validateStatus` 必须设为 `< 300`，让 3xx 响应抛 DioException 进入 catch，
+  /// 这样我们才能拿到 Location header。如果设为 `< 400`（旧版 bug），3xx 会被
+  /// 视为正常响应返回 → 循环直接 break，**整个重定向链路丢失**，导致快手
+  /// 短链 `v.kuaishou.com/xxx` 永远拿不到跳转后的 `chenzhongtech.com/fw/live/{username}`。
   Future<List<String>> _followAllRedirects(
     String url, {
     int maxRedirects = 8,
@@ -361,7 +367,8 @@ class ParseController extends GetxController {
           current,
           options: Options(
             followRedirects: false,
-            validateStatus: (status) => status != null && status < 400,
+            // 只把 2xx 视为成功；3xx 让其抛 DioException 走 catch，便于读 Location
+            validateStatus: (status) => status != null && status < 300,
             responseType: ResponseType.plain,
             headers: {
               "User-Agent": mobileUA ? _kKuaishouMobileUA : _kKuaishouDesktopUA,
@@ -558,7 +565,8 @@ class ParseController extends GetxController {
         url,
         options: Options(
           followRedirects: false,
-          validateStatus: (status) => status != null && status < 400,
+          // 只把 2xx 视为成功；3xx 让其抛 DioException 走 catch 读 Location
+          validateStatus: (status) => status != null && status < 300,
           headers: const {
             "User-Agent":
                 "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
