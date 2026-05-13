@@ -338,43 +338,29 @@ class KuaishouSite implements LiveSite {
     final config = (firstNode["config"] ?? const {}) as Map;
 
     // 开播判定：
-    // 1. 优先尊重明确的"未开播"信号：status.forbiddenState != 0（禁播/已下播）+
-    //    显式 isLiving=false / living=false。这样能避免主播未开播时
-    //    因 playUrls={h264:{},hevc:{}} 这种空架子被误判为开播，进而
-    //    报"无法读取播放清晰度"。
-    // 2. 其它字段 OR 兜底，尽量宽松覆盖快手 SSR 不同版本。
-    final statusNode = firstNode["status"];
-    final forbiddenState = (statusNode is Map)
-        ? int.tryParse(statusNode["forbiddenState"]?.toString() ?? "0") ?? 0
-        : 0;
-    final explicitNotLiving = forbiddenState != 0 ||
-        firstNode["isLiving"] == false ||
-        firstNode["living"] == false ||
-        liveStream["living"] == false ||
-        author["living"] == false;
-
-    bool isLive;
-    if (explicitNotLiving) {
-      isLive = false;
-    } else {
-      isLive = firstNode["isLiving"] == true ||
-          firstNode["living"] == true ||
-          liveStream["isLive"] == true ||
-          liveStream["living"] == true ||
-          liveStream["status"]?.toString() == "1" ||
-          liveStream["status"]?.toString() == "2" ||
-          liveStream["status"]?.toString().toUpperCase() == "LIVING" ||
-          config["living"] == true ||
-          config["status"]?.toString() == "1" ||
-          (liveStream["id"]?.toString() ?? "").isNotEmpty ||
-          (config["liveStreamId"]?.toString() ?? "").isNotEmpty ||
-          _hasUsefulPlayUrls(liveStream["playUrls"]) ||
-          _hasUsefulPlayUrls(config["playUrls"]) ||
-          (config["multiResolutionPlayUrls"] is List &&
-              (config["multiResolutionPlayUrls"] as List).isNotEmpty) ||
-          (liveStream["multiResolutionPlayUrls"] is List &&
-              (liveStream["multiResolutionPlayUrls"] as List).isNotEmpty);
-    }
+    // 历史踩坑 ① —— 直接 `playUrls.isNotEmpty` 判定：
+    //   未开播时 SSR 也会有 `playUrls={h264:{},hevc:{}}` 空架子（Map 非空但里面没内容）。
+    //   修复：用 `_hasUsefulPlayUrls` 区分真实 playUrls 与空架子。
+    // 历史踩坑 ② —— 用 `forbiddenState != 0` / `author.living == false` 当"明确未开播"前置：
+    //   实测 CHEN天赐〽️王者荣耀 在播时 SSR 里 `forbiddenState:1`、`author.living:false`，
+    //   但 `firstNode.isLiving:true` 且 playUrls 完整可播。这两个字段在快手语义下
+    //   并不等于"未开播"，作为否决条件会**误伤真实在播主播**。
+    //   修复：回退该前置否决，统一走正向 OR 链；只要任意一个开播信号命中即视为在播。
+    bool isLive = firstNode["isLiving"] == true ||
+        firstNode["living"] == true ||
+        liveStream["isLive"] == true ||
+        liveStream["living"] == true ||
+        liveStream["status"]?.toString() == "1" ||
+        liveStream["status"]?.toString() == "2" ||
+        liveStream["status"]?.toString().toUpperCase() == "LIVING" ||
+        config["living"] == true ||
+        config["status"]?.toString() == "1" ||
+        _hasUsefulPlayUrls(liveStream["playUrls"]) ||
+        _hasUsefulPlayUrls(config["playUrls"]) ||
+        (config["multiResolutionPlayUrls"] is List &&
+            (config["multiResolutionPlayUrls"] as List).isNotEmpty) ||
+        (liveStream["multiResolutionPlayUrls"] is List &&
+            (liveStream["multiResolutionPlayUrls"] as List).isNotEmpty);
 
     // 兜底：仅当 SSR 完全没拿到开播信号时，用 search/author 反查确认在播 +
     // 补全主播 UI 信息（id / name / avatar / description）。
