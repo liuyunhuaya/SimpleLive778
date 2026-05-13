@@ -9,6 +9,10 @@ simple_live_app/.vscode/settings.json
 simple_live_tv_app/.vscode/settings.json
 .claude/
 
+# ============= 本地打包脚本（仅本地使用，不上传） =============
+build_windows.ps1
+打包Windows.bat
+
 # ============= Flutter / Dart =============
 **/.dart_tool/
 **/.flutter-plugins
