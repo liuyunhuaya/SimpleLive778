@@ -278,40 +278,54 @@ class ParseController extends GetxController {
       _toastInParse("无法识别此快手链接，可能不是直播间分享");
       return [];
     }
-    // 快手 App 分享后的中转域名：https://v.m.chenzhongtech.com/fw/live/{photoId}?...&efid={eid}
-    // 注意：userId / originShareUserId 可能是分享者而非主播，必须严格只匹配确定是主播的 eid 类字段
+    // 快手 App 分享后的中转域名：https://v.m.chenzhongtech.com/fw/live/{username}?...&efid={photoId}
+    //
+    // 实测链路（curl 验证）：
+    //   https://v.kuaishou.com/K5Do1RsP
+    //   → 302 https://v.m.chenzhongtech.com/fw/live/tianci666?efid=3xsdnab6r256z8g&userId=125393142&...
+    //
+    // 关键事实（之前的代码理解错了）：
+    //   - URL **path** 段 `/fw/live/tianci666` 中的 tianci666 才是**主播 username/eid**，
+    //     可直接用于 `https://live.kuaishou.com/u/tianci666`
+    //   - URL **query** 参数 `efid=3xsdnab6r256z8g` 是 photoId / 直播流 ID，**不是主播 eid**，
+    //     用它去访问 `live.kuaishou.com/u/{efid}` 会拿到主播信息但 SSR 中 playUrls 为空架子
+    //     `{h264:{}, hevc:{}}`，进入直播间就会报"无法读取播放清晰度"
+    //   - userId 是主播 originUserId（数字），shareEid 才是分享者 eid（不是主播）
+    //
+    // 因此修复后的优先级：path > 抓 HTML > query 兜底，并彻底移除 efid 作为主播 ID 的提取。
     if (url.contains("chenzhongtech.com") || url.contains("kwai.com")) {
-      // 优先级 1：从 query 参数中读取主播 eid 类标识（efid / shareEid / principalId / authorId / eid）
-      const candidateQueryKeys = [
-        "efid",
-        "shareEid",
-        "principalId",
-        "authorId",
-        "eid",
-      ];
-      for (final key in candidateQueryKeys) {
-        final reg = RegExp("[?&]$key=([\\d\\w\\-_]+)");
-        final m = reg.firstMatch(url)?.group(1) ?? "";
-        if (m.isNotEmpty && m.length >= 5) {
-          Log.d("[Parse] kuaishou chenzhongtech 命中参数 $key=$m");
-          return [m, Sites.allSites[Constant.kKuaishou]!];
-        }
-      }
-      // 优先级 2：抓 HTML 兜底找 eid（注意：先抓 HTML 再匹配路径，
-      // 因为 chenzhongtech 路径中的 ID 通常是 liveStreamId（房间流ID），不能直接当主播 eid 用）
-      final eid = await _extractKuaishouIdFromHtml(url);
-      if (eid.isNotEmpty) {
-        return [eid, Sites.allSites[Constant.kKuaishou]!];
-      }
-      // 优先级 3：路径中的 user 段是真实主播 ID；live/photo 段是 streamId 不可作为主播 ID
+      // 优先级 1：URL 路径中的主播段（live / user / profile / u）
       const pathPatterns = [
-        r"/fw/user/([\d\w\-_]+)",
+        // /fw/live/{username} & /fw/user/{eid} → 主播标识
+        r"/fw/(?:live|user)/([\d\w\-_]+)",
+        // /profile/{eid} & /u/{eid} → 主播标识
         r"/(?:profile|u)/([\d\w\-_]+)",
       ];
       for (final p in pathPatterns) {
         final m = RegExp(p).firstMatch(url)?.group(1) ?? "";
         if (m.isNotEmpty && m.length >= 5) {
           Log.d("[Parse] kuaishou chenzhongtech 命中路径 $m");
+          return [m, Sites.allSites[Constant.kKuaishou]!];
+        }
+      }
+      // 优先级 2：抓 HTML 兜底找主播 eid（og:url / principalId / authorId / live.kuaishou.com/u/）
+      final eid = await _extractKuaishouIdFromHtml(url);
+      if (eid.isNotEmpty) {
+        return [eid, Sites.allSites[Constant.kKuaishou]!];
+      }
+      // 优先级 3：query 参数兜底（注意：efid 是 photoId 已剔除；userId 是 originUserId 部分场景能用）
+      const candidateQueryKeys = [
+        "principalId",
+        "authorId",
+        "eid",
+        "shareEid",
+        "userId", // 主播 originUserId（部分场景 live.kuaishou.com/u/{originUserId} 也能命中）
+      ];
+      for (final key in candidateQueryKeys) {
+        final reg = RegExp("[?&]$key=([\\d\\w\\-_]+)");
+        final m = reg.firstMatch(url)?.group(1) ?? "";
+        if (m.isNotEmpty && m.length >= 5) {
+          Log.d("[Parse] kuaishou chenzhongtech 命中参数 $key=$m");
           return [m, Sites.allSites[Constant.kKuaishou]!];
         }
       }
@@ -452,7 +466,43 @@ class ParseController extends GetxController {
         }
       }
 
-      // ② 从内嵌 JSON 中找 principalId / authorId / eid（注意排除 userId 太短的情况）
+      // ② HTML 文本中直接搜索 live.kuaishou.com/u/xxx（最权威，直接是主播页 URL）
+      final liveReg = RegExp(r'live\.kuaishou\.com/u/([\d\w\-_]+)');
+      final liveMatch = liveReg.firstMatch(html);
+      if (liveMatch != null) {
+        final eid = liveMatch.group(1) ?? "";
+        if (eid.isNotEmpty) {
+          Log.d("[Parse] kuaishou html live/u/ -> $eid");
+          return eid;
+        }
+      }
+
+      // ③ HTML 文本中搜索 kuaishou.com/profile/xxx（次权威）
+      final profReg = RegExp(r'kuaishou\.com/profile/([\d\w\-_]+)');
+      final profMatch = profReg.firstMatch(html);
+      if (profMatch != null) {
+        final eid = profMatch.group(1) ?? "";
+        if (eid.isNotEmpty) {
+          Log.d("[Parse] kuaishou html profile -> $eid");
+          return eid;
+        }
+      }
+
+      // ④ HTML 文本中搜索 v.m.chenzhongtech.com/fw/(live|user)/xxx 中的 path 段
+      // path 段是主播 username/eid（如 tianci666），可直接用作 live.kuaishou.com/u/{x}
+      final fwReg = RegExp(r'(?:chenzhongtech|kwai)\.com/fw/(?:live|user)/([\d\w\-_]+)');
+      final fwMatch = fwReg.firstMatch(html);
+      if (fwMatch != null) {
+        final eid = fwMatch.group(1) ?? "";
+        if (eid.isNotEmpty) {
+          Log.d("[Parse] kuaishou html fw/live -> $eid");
+          return eid;
+        }
+      }
+
+      // ⑤ 从内嵌 JSON 中找 principalId / authorId / eid（兜底）
+      // 注意：效验 efid 故意排除——它是 photoId 不是主播 eid，会导致进入直播间
+      // 时 SSR 拿不到 playUrls，报"无法读取播放清晰度"
       const idJsonKeys = [
         "principalId",
         "authorId",
@@ -467,39 +517,6 @@ class ParseController extends GetxController {
         }
       }
 
-      // ③ HTML 文本中直接搜索 live.kuaishou.com/u/xxx
-      final liveReg = RegExp(r'live\.kuaishou\.com/u/([\d\w\-_]+)');
-      final liveMatch = liveReg.firstMatch(html);
-      if (liveMatch != null) {
-        final eid = liveMatch.group(1) ?? "";
-        if (eid.isNotEmpty) {
-          Log.d("[Parse] kuaishou html live/u/ -> $eid");
-          return eid;
-        }
-      }
-
-      // ④ HTML 文本中搜索 kuaishou.com/profile/xxx
-      final profReg = RegExp(r'kuaishou\.com/profile/([\d\w\-_]+)');
-      final profMatch = profReg.firstMatch(html);
-      if (profMatch != null) {
-        final eid = profMatch.group(1) ?? "";
-        if (eid.isNotEmpty) {
-          Log.d("[Parse] kuaishou html profile -> $eid");
-          return eid;
-        }
-      }
-
-      // ⑤ chenzhongtech 跳转链接中的 efid
-      final efidReg = RegExp(r'[?&]efid=([\d\w\-_]+)');
-      final efidMatch = efidReg.firstMatch(html);
-      if (efidMatch != null) {
-        final eid = efidMatch.group(1) ?? "";
-        if (eid.isNotEmpty) {
-          Log.d("[Parse] kuaishou html efid -> $eid");
-          return eid;
-        }
-      }
-
       return "";
     } catch (e) {
       Log.logPrint(e);
@@ -507,13 +524,23 @@ class ParseController extends GetxController {
     }
   }
 
-  /// 从给定 URL 中尝试按已知模式提取 eid（live/u/、profile/、efid=）。
+  /// 从给定 URL 中尝试按已知模式提取主播 eid。
+  ///
+  /// **优先级（按 URL 中已知主播标识的可靠程度排序）**：
+  /// 1. `live.kuaishou.com/u/{x}` → 主播页 path
+  /// 2. `kuaishou.com/profile/{x}` → 主播 profile 页
+  /// 3. `(chenzhongtech|kwai).com/fw/(live|user)/{x}` → 分享中转页 path（如 tianci666）
+  /// 4. query `principalId` / `authorId` → 兜底
+  ///
+  /// **注意**：故意不再提取 `efid` query 参数。它是 photoId / 直播流 ID，
+  /// 不是主播 eid，用它去 `live.kuaishou.com/u/{efid}` 会拿到主播信息但 SSR 中 playUrls
+  /// 为空架子 `{h264:{}, hevc:{}}`，进入直播间会报"无法读取播放清晰度"。
   String _extractIdFromUrlString(String url) {
     if (url.isEmpty) return "";
     final patterns = <RegExp>[
       RegExp(r"live\.kuaishou\.com/u/([\d\w\-_]+)"),
       RegExp(r"kuaishou\.com/profile/([\d\w\-_]+)"),
-      RegExp(r"[?&]efid=([\d\w\-_]+)"),
+      RegExp(r"(?:chenzhongtech|kwai)\.com/fw/(?:live|user)/([\d\w\-_]+)"),
       RegExp(r"[?&]principalId=([\d\w\-_]+)"),
       RegExp(r"[?&]authorId=([\d\w\-_]+)"),
     ];

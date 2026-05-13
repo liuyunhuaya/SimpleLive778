@@ -337,26 +337,44 @@ class KuaishouSite implements LiveSite {
     final gameInfo = (firstNode["gameInfo"] ?? const {}) as Map;
     final config = (firstNode["config"] ?? const {}) as Map;
 
-    // 开播判定：尽量宽松，覆盖快手 SSR 不同版本的字段
-    bool isLive = firstNode["isLiving"] == true ||
-        firstNode["living"] == true ||
-        liveStream["isLive"] == true ||
-        liveStream["living"] == true ||
-        liveStream["status"]?.toString() == "1" ||
-        liveStream["status"]?.toString() == "2" ||
-        liveStream["status"]?.toString().toUpperCase() == "LIVING" ||
-        config["living"] == true ||
-        config["status"]?.toString() == "1" ||
-        (liveStream["id"]?.toString() ?? "").isNotEmpty ||
-        (config["liveStreamId"]?.toString() ?? "").isNotEmpty ||
-        (liveStream["playUrls"] is List &&
-            (liveStream["playUrls"] as List).isNotEmpty) ||
-        (liveStream["playUrls"] is Map &&
-            (liveStream["playUrls"] as Map).isNotEmpty) ||
-        (config["multiResolutionPlayUrls"] is List &&
-            (config["multiResolutionPlayUrls"] as List).isNotEmpty) ||
-        (liveStream["multiResolutionPlayUrls"] is List &&
-            (liveStream["multiResolutionPlayUrls"] as List).isNotEmpty);
+    // 开播判定：
+    // 1. 优先尊重明确的"未开播"信号：status.forbiddenState != 0（禁播/已下播）+
+    //    显式 isLiving=false / living=false。这样能避免主播未开播时
+    //    因 playUrls={h264:{},hevc:{}} 这种空架子被误判为开播，进而
+    //    报"无法读取播放清晰度"。
+    // 2. 其它字段 OR 兜底，尽量宽松覆盖快手 SSR 不同版本。
+    final statusNode = firstNode["status"];
+    final forbiddenState = (statusNode is Map)
+        ? int.tryParse(statusNode["forbiddenState"]?.toString() ?? "0") ?? 0
+        : 0;
+    final explicitNotLiving = forbiddenState != 0 ||
+        firstNode["isLiving"] == false ||
+        firstNode["living"] == false ||
+        liveStream["living"] == false ||
+        author["living"] == false;
+
+    bool isLive;
+    if (explicitNotLiving) {
+      isLive = false;
+    } else {
+      isLive = firstNode["isLiving"] == true ||
+          firstNode["living"] == true ||
+          liveStream["isLive"] == true ||
+          liveStream["living"] == true ||
+          liveStream["status"]?.toString() == "1" ||
+          liveStream["status"]?.toString() == "2" ||
+          liveStream["status"]?.toString().toUpperCase() == "LIVING" ||
+          config["living"] == true ||
+          config["status"]?.toString() == "1" ||
+          (liveStream["id"]?.toString() ?? "").isNotEmpty ||
+          (config["liveStreamId"]?.toString() ?? "").isNotEmpty ||
+          _hasUsefulPlayUrls(liveStream["playUrls"]) ||
+          _hasUsefulPlayUrls(config["playUrls"]) ||
+          (config["multiResolutionPlayUrls"] is List &&
+              (config["multiResolutionPlayUrls"] as List).isNotEmpty) ||
+          (liveStream["multiResolutionPlayUrls"] is List &&
+              (liveStream["multiResolutionPlayUrls"] as List).isNotEmpty);
+    }
 
     // 兜底：仅当 SSR 完全没拿到开播信号时，用 search/author 反查确认在播 +
     // 补全主播 UI 信息（id / name / avatar / description）。
@@ -1139,6 +1157,32 @@ class KuaishouSite implements LiveSite {
       }
     }
     return best;
+  }
+
+  /// 校验 `playUrls` 字段是否真的包含可播放数据。
+  ///
+  /// 快手主播未开播时，SSR 中的 `liveStream.playUrls` 经常会出现 **空架子**：
+  /// ```json
+  /// "playUrls": { "h264": {}, "hevc": {} }
+  /// ```
+  /// 这种结构 `is Map` 且 `isNotEmpty == true`（含 2 个 key），但里面没有任何
+  /// 可播 representation。如果直接用 `isNotEmpty` 当作开播信号，会把未开播
+  /// 误判为开播，进而触发 `getPlayQualites` 返回空，向用户报"无法读取播放清晰度"。
+  ///
+  /// 本方法只在以下场景判定为 true：
+  /// - List：非空
+  /// - Map：至少有一个子值是非空的 Map（含 adaptationSet/representation 等）或非空 List
+  bool _hasUsefulPlayUrls(dynamic playUrls) {
+    if (playUrls is List) return playUrls.isNotEmpty;
+    if (playUrls is Map) {
+      if (playUrls.isEmpty) return false;
+      for (final v in playUrls.values) {
+        if (v is Map && v.isNotEmpty) return true;
+        if (v is List && v.isNotEmpty) return true;
+      }
+      return false;
+    }
+    return false;
   }
 
   /// 在状态树中递归查找指定 key
