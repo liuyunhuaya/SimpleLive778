@@ -249,40 +249,18 @@ class BiliBiliSite implements LiveSite {
       queryParameters: queryParams,
       header: await getHeader(),
     );
-    List<String> serverHosts = [];
+    // 弹幕服务器列表构造：把官方主域 `broadcastlv.chat.bilibili.com:443` 排首位，
+    // 它持有 bilibili 主通配证书，iOS / Android / Windows 上 TLS 握手最稳定。
+    // host_list 返回的 CDN host 作为备选（部分 CDN host 证书 SNI 在 iOS 上偶发不匹配）。
+    // 端口统一用 443，禁用 API 返回的 2243 等非标端口（iOS ATS 友好）。
+    const officialHost = "broadcastlv.chat.bilibili.com:443";
+    final List<String> serverHosts = [officialHost];
     if (roomDanmakuResult["data"]["host_list"] != null) {
-      var hostList = roomDanmakuResult["data"]["host_list"] as List;
-      print("B站弹幕服务器列表: $hostList");
-      
-      // 强制使用443端口（标准HTTPS/WSS端口）
-      // API返回的端口可能不正确，导致连接失败
-      for (var e in hostList) {
-        var host = e["host"].toString();
-        var wssPort = e["wss_port"];
-        
-        print("服务器: $host, API返回WSS端口: $wssPort, 实际使用: 443");
-        
-        // 强制使用443端口，忽略API返回值
-        serverHosts.add("$host:443");
-      }
-      
-      // 添加额外的备用服务器
-      if (!serverHosts.any((s) => s.contains("broadcastlv.chat.bilibili.com"))) {
-        serverHosts.add("broadcastlv.chat.bilibili.com:443");
+      for (var e in roomDanmakuResult["data"]["host_list"] as List) {
+        final entry = "${e["host"]}:443";
+        if (!serverHosts.contains(entry)) serverHosts.add(entry);
       }
     }
-    
-    // 确保有默认的服务器
-    if (serverHosts.isEmpty) {
-      // 使用备用服务器，端口443
-      serverHosts.addAll([
-        "broadcastlv.chat.bilibili.com:443",
-        "tx-sh-live-comet-08.chat.bilibili.com:443",
-        "tx-bj-live-comet-08.chat.bilibili.com:443",
-      ]);
-    }
-    
-    print("最终使用的B站弹幕服务器列表: $serverHosts");
 
     //var buvid = await getBuvid();
     // 从 roomInfo 中提取 live_start_time
@@ -303,11 +281,13 @@ class BiliBiliSite implements LiveSite {
         int minutes = (durationInSeconds % 3600) ~/ 60;
         int seconds = durationInSeconds % 60;
 
-        String formattedDuration =
+        // 仅计算结果保留在变量中，避免向控制台输出调试日志
+        // 如未来需要，可以通过 showTime 字段在 UI 上展示
+        // ignore: unused_local_variable
+        final formattedDuration =
             '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-        print('Bilibili直播间 $roomId 开播时长: $formattedDuration');
-      } catch (e) {
-        print('计算 Bilibili 开播时长出错: $e');
+      } catch (_) {
+        // 解析失败时静默忽略
       }
     }
 
@@ -345,7 +325,6 @@ class BiliBiliSite implements LiveSite {
       queryParameters: queryParams,
       header: await getHeader(),
     );
-    print("【B站接口返回】roomId=$roomId, result=$result");
     return result["data"];
   }
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:web_socket_channel/io.dart';
 
@@ -37,6 +38,11 @@ class WebScoketUtils {
 
   /// 请求头
   Map<String, dynamic>? headers;
+
+  /// 自定义 HttpClient（用于在 iOS 等平台对 TLS / 证书校验做额外配置；
+  /// 例如 B 站弹幕 CDN host 的 SNI/证书校验在 iOS 上偶发失败，
+  /// 上层可传入一个仅对特定域名放行 badCertificate 的 HttpClient 兜底）。
+  final HttpClient? customClient;
   WebScoketUtils({
     required this.url,
     required this.heartBeatTime,
@@ -47,6 +53,7 @@ class WebScoketUtils {
     this.onHeartBeat,
     this.headers,
     this.backupUrl,
+    this.customClient,
   });
   IOWebSocketChannel? webSocket;
   Timer? heartBeatTimer;
@@ -71,6 +78,7 @@ class WebScoketUtils {
         wsurl,
         connectTimeout: Duration(seconds: 10),
         headers: headers,
+        customClient: customClient,
       );
 
       await webSocket?.ready;
